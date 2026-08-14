@@ -20,4 +20,4 @@ public class SpeedLimitDto {
 
     @NotBlank(message = "隧道名称不能为空")
     private String tunnelName;
-} 
+}

@@ -4,7 +4,7 @@ import { getPanelAddresses, isWebViewFunc} from '@/utils/panel';
 
 interface PanelAddress {
   name: string;
-  address: string;   
+  address: string;
   inx: boolean;
 }
 
@@ -48,7 +48,7 @@ function handleTokenExpired() {
   window.localStorage.removeItem('token');
   window.localStorage.removeItem('role_id');
   window.localStorage.removeItem('name');
-  
+
   // 跳转到登录页面
   if (window.location.pathname !== '/') {
     window.location.href = '/';
@@ -57,8 +57,8 @@ function handleTokenExpired() {
 
 // 检查响应是否为token失效
 function isTokenExpired(response: ApiResponse) {
-  return response && response.code === 401 && 
-         (response.msg === '未登录或token已过期' || 
+  return response && response.code === 401 &&
+         (response.msg === '未登录或token已过期' ||
           response.msg === '无效的token或token已过期' ||
           response.msg === '无法获取用户权限信息');
 }
@@ -89,13 +89,13 @@ const Network = {
         })
                  .catch(function(error: any) {
            console.error('GET请求错误:', error);
-           
+
            // 检查是否是401错误（token失效）
            if (error.response && error.response.status === 401) {
              handleTokenExpired();
              return;
            }
-           
+
            resolve({"code": -1, "msg": error.message || "网络请求失败", "data": null as T});
          });
     });
@@ -126,17 +126,17 @@ const Network = {
         })
                  .catch(function(error: any) {
            console.error('POST请求错误:', error);
-           
+
            // 检查是否是401错误（token失效）
            if (error.response && error.response.status === 401) {
              handleTokenExpired();
              return;
            }
-           
+
            resolve({"code": -1, "msg": error.message || "网络请求失败", "data": null as T});
          });
     });
   }
 };
 
-export default Network; 
+export default Network;

@@ -13,10 +13,10 @@ import toast from 'react-hot-toast';
 import axios from 'axios';
 
 
-import { 
-  createNode, 
-  getNodeList, 
-  updateNode, 
+import {
+  createNode,
+  getNodeList,
+  updateNode,
   deleteNode,
   getNodeInstallCommand
 } from "@/api";
@@ -82,12 +82,12 @@ export default function NodePage() {
     socks: 0
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
-  
+
   // 安装命令相关状态
   const [installCommandModal, setInstallCommandModal] = useState(false);
   const [installCommand, setInstallCommand] = useState('');
   const [currentNodeName, setCurrentNodeName] = useState('');
-  
+
   const websocketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttemptsRef = useRef(0);
@@ -96,7 +96,7 @@ export default function NodePage() {
   useEffect(() => {
     loadNodes();
     initWebSocket();
-    
+
     return () => {
       closeWebSocket();
     };
@@ -126,27 +126,27 @@ export default function NodePage() {
 
   // 初始化WebSocket连接
   const initWebSocket = () => {
-    if (websocketRef.current && 
-        (websocketRef.current.readyState === WebSocket.OPEN || 
+    if (websocketRef.current &&
+        (websocketRef.current.readyState === WebSocket.OPEN ||
          websocketRef.current.readyState === WebSocket.CONNECTING)) {
       return;
     }
-    
+
     if (websocketRef.current) {
       closeWebSocket();
     }
-    
+
     // 构建WebSocket URL，使用axios的baseURL
     const baseUrl = axios.defaults.baseURL || (import.meta.env.VITE_API_BASE ? `${import.meta.env.VITE_API_BASE}/api/v1/` : '/api/v1/');
     const wsUrl = baseUrl.replace(/^http/, 'ws').replace(/\/api\/v1\/$/, '') + `/system-info?type=0&secret=${localStorage.getItem('token')}`;
-    
+
     try {
       websocketRef.current = new WebSocket(wsUrl);
-      
+
       websocketRef.current.onopen = () => {
         reconnectAttemptsRef.current = 0;
       };
-      
+
       websocketRef.current.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
@@ -155,11 +155,11 @@ export default function NodePage() {
           // 解析失败时不输出错误信息
         }
       };
-      
+
       websocketRef.current.onerror = () => {
         // WebSocket错误时不输出错误信息
       };
-      
+
       websocketRef.current.onclose = () => {
         websocketRef.current = null;
         attemptReconnect();
@@ -172,7 +172,7 @@ export default function NodePage() {
   // 处理WebSocket消息
   const handleWebSocketMessage = (data: any) => {
     const { id, type, data: messageData } = data;
-    
+
     if (type === 'status') {
       setNodeList(prev => prev.map(node => {
         if (node.id == id) {
@@ -194,37 +194,37 @@ export default function NodePage() {
             } else {
               systemInfo = messageData;
             }
-            
+
             const currentUpload = parseInt(systemInfo.bytes_transmitted) || 0;
             const currentDownload = parseInt(systemInfo.bytes_received) || 0;
             const currentUptime = parseInt(systemInfo.uptime) || 0;
-            
+
             let uploadSpeed = 0;
             let downloadSpeed = 0;
-            
+
             if (node.systemInfo && node.systemInfo.uptime) {
               const timeDiff = currentUptime - node.systemInfo.uptime;
-              
+
               if (timeDiff > 0 && timeDiff <= 10) {
                 const lastUpload = node.systemInfo.uploadTraffic || 0;
                 const lastDownload = node.systemInfo.downloadTraffic || 0;
-                
+
                 const uploadDiff = currentUpload - lastUpload;
                 const downloadDiff = currentDownload - lastDownload;
-                
+
                 const uploadReset = currentUpload < lastUpload;
                 const downloadReset = currentDownload < lastDownload;
-                
+
                 if (!uploadReset && uploadDiff >= 0) {
                   uploadSpeed = uploadDiff / timeDiff;
                 }
-                
+
                 if (!downloadReset && downloadDiff >= 0) {
                   downloadSpeed = downloadDiff / timeDiff;
                 }
               }
             }
-            
+
             return {
               ...node,
               connectionStatus: 'online',
@@ -251,7 +251,7 @@ export default function NodePage() {
   const attemptReconnect = () => {
     if (reconnectAttemptsRef.current < maxReconnectAttempts) {
       reconnectAttemptsRef.current++;
-      
+
       reconnectTimerRef.current = setTimeout(() => {
         initWebSocket();
       }, 3000 * reconnectAttemptsRef.current);
@@ -264,23 +264,23 @@ export default function NodePage() {
       clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
     }
-    
+
     reconnectAttemptsRef.current = 0;
-    
+
     if (websocketRef.current) {
       websocketRef.current.onopen = null;
       websocketRef.current.onmessage = null;
       websocketRef.current.onerror = null;
       websocketRef.current.onclose = null;
-      
-      if (websocketRef.current.readyState === WebSocket.OPEN || 
+
+      if (websocketRef.current.readyState === WebSocket.OPEN ||
           websocketRef.current.readyState === WebSocket.CONNECTING) {
         websocketRef.current.close();
       }
-      
+
       websocketRef.current = null;
     }
-    
+
     setNodeList(prev => prev.map(node => ({
       ...node,
       connectionStatus: 'offline',
@@ -289,26 +289,26 @@ export default function NodePage() {
   };
 
 
-  
+
   // 格式化速度
   const formatSpeed = (bytesPerSecond: number): string => {
     if (bytesPerSecond === 0) return '0 B/s';
-    
+
     const k = 1024;
     const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s', 'TB/s'];
     const i = Math.floor(Math.log(bytesPerSecond) / Math.log(k));
-    
+
     return parseFloat((bytesPerSecond / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
   // 格式化开机时间
   const formatUptime = (seconds: number): string => {
     if (seconds === 0) return '-';
-    
+
     const days = Math.floor(seconds / 86400);
     const hours = Math.floor((seconds % 86400) / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
-    
+
     if (days > 0) {
       return `${days}天${hours}小时`;
     } else if (hours > 0) {
@@ -321,11 +321,11 @@ export default function NodePage() {
   // 格式化流量
   const formatTraffic = (bytes: number): string => {
     if (bytes === 0) return '0 B';
-    
+
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
-    
+
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
@@ -340,32 +340,32 @@ export default function NodePage() {
   // 验证IP地址格式
   const validateIp = (ip: string): boolean => {
     if (!ip || !ip.trim()) return false;
-    
+
     const trimmedIp = ip.trim();
-    
+
     // IPv4格式验证
     const ipv4Regex = /^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
-    
+
     // IPv6格式验证
     const ipv6Regex = /^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))$/;
-    
+
     if (ipv4Regex.test(trimmedIp) || ipv6Regex.test(trimmedIp) || trimmedIp === 'localhost') {
       return true;
     }
-    
+
     // 验证域名格式
     if (/^\d+$/.test(trimmedIp)) return false;
-    
+
     const domainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)+$/;
     const singleLabelDomain = /^[a-zA-Z][a-zA-Z0-9\-]{0,62}$/;
-    
+
     return domainRegex.test(trimmedIp) || singleLabelDomain.test(trimmedIp);
   };
 
   // 表单验证
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
-    
+
     if (!form.name.trim()) {
       newErrors.name = '请输入节点名称';
     } else if (form.name.trim().length < 2) {
@@ -373,7 +373,7 @@ export default function NodePage() {
     } else if (form.name.trim().length > 50) {
       newErrors.name = '节点名称长度不能超过50位';
     }
-    
+
     if (!form.ipString.trim()) {
       newErrors.ipString = '请输入入口IP地址';
     } else {
@@ -389,23 +389,23 @@ export default function NodePage() {
         }
       }
     }
-    
+
     if (!form.serverIp.trim()) {
       newErrors.serverIp = '请输入服务器IP地址';
     } else if (!validateIp(form.serverIp.trim())) {
       newErrors.serverIp = '请输入有效的IPv4、IPv6地址或域名';
     }
-    
+
     if (!form.portSta || form.portSta < 1 || form.portSta > 65535) {
       newErrors.portSta = '端口范围必须在1-65535之间';
     }
-    
+
     if (!form.portEnd || form.portEnd < 1 || form.portEnd > 65535) {
       newErrors.portEnd = '端口范围必须在1-65535之间';
     } else if (form.portEnd < form.portSta) {
       newErrors.portEnd = '结束端口不能小于起始端口';
     }
-    
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -449,7 +449,7 @@ export default function NodePage() {
 
   const confirmDelete = async () => {
     if (!nodeToDelete) return;
-    
+
     setDeleteLoading(true);
     try {
       const res = await deleteNode(nodeToDelete.id);
@@ -470,10 +470,10 @@ export default function NodePage() {
 
   // 复制安装命令
   const handleCopyInstallCommand = async (node: Node) => {
-    setNodeList(prev => prev.map(n => 
+    setNodeList(prev => prev.map(n =>
       n.id === node.id ? { ...n, copyLoading: true } : n
     ));
-    
+
     try {
       const res = await getNodeInstallCommand(node.id);
       if (res.code === 0 && res.data) {
@@ -492,7 +492,7 @@ export default function NodePage() {
     } catch (error) {
       toast.error('获取安装命令失败');
     } finally {
-      setNodeList(prev => prev.map(n => 
+      setNodeList(prev => prev.map(n =>
         n.id === node.id ? { ...n, copyLoading: false } : n
       ));
     }
@@ -512,25 +512,25 @@ export default function NodePage() {
   // 提交表单
   const handleSubmit = async () => {
     if (!validateForm()) return;
-    
+
     setSubmitLoading(true);
-    
+
     try {
       const ipString = form.ipString
         .split('\n')
         .map(ip => ip.trim())
         .filter(ip => ip)
         .join(',');
-        
+
       const submitData = {
         ...form,
         ip: ipString
       };
       delete (submitData as any).ipString;
-      
+
       const apiCall = isEdit ? updateNode : createNode;
-      const data = isEdit ? submitData : { 
-        name: form.name, 
+      const data = isEdit ? submitData : {
+        name: form.name,
         ip: ipString,
         serverIp: form.serverIp,
         portSta: form.portSta,
@@ -539,14 +539,14 @@ export default function NodePage() {
         tls: form.tls,
         socks: form.socks
       };
-      
+
       const res = await apiCall(data);
       if (res.code === 0) {
         toast.success(isEdit ? '更新成功' : '创建成功');
         setDialogVisible(false);
-        
+
         if (isEdit) {
-          setNodeList(prev => prev.map(n => 
+          setNodeList(prev => prev.map(n =>
             n.id === form.id ? {
               ...n,
               name: form.name,
@@ -589,7 +589,7 @@ export default function NodePage() {
   };
 
   return (
-    
+
       <div className="px-3 lg:px-6 py-8">
         {/* 页面头部 */}
         <div className="flex items-center justify-between mb-6">
@@ -601,11 +601,11 @@ export default function NodePage() {
               variant="flat"
               color="primary"
               onPress={handleAdd}
-             
+
             >
               新增
             </Button>
-     
+
         </div>
 
         {/* 节点列表 */}
@@ -635,8 +635,8 @@ export default function NodePage() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
             {nodeList.map((node) => (
-              <Card 
-                key={node.id} 
+              <Card
+                key={node.id}
                 className="shadow-sm border border-divider hover:shadow-md transition-shadow duration-200"
               >
                 <CardHeader className="pb-2">
@@ -646,9 +646,9 @@ export default function NodePage() {
                       <p className="text-xs text-default-500 truncate">{node.serverIp}</p>
                     </div>
                     <div className="flex items-center gap-1.5 ml-2">
-                      <Chip 
-                        color={node.connectionStatus === 'online' ? 'success' : 'danger'} 
-                        variant="flat" 
+                      <Chip
+                        color={node.connectionStatus === 'online' ? 'success' : 'danger'}
+                        variant="flat"
                         size="sm"
                         className="text-xs"
                       >
@@ -688,7 +688,7 @@ export default function NodePage() {
                     <div className="flex justify-between text-sm">
                       <span className="text-default-600">开机时间</span>
                       <span className="text-xs">
-                        {node.connectionStatus === 'online' && node.systemInfo 
+                        {node.connectionStatus === 'online' && node.systemInfo
                           ? formatUptime(node.systemInfo.uptime)
                           : '-'
                         }
@@ -703,8 +703,8 @@ export default function NodePage() {
                         <div className="flex justify-between text-xs mb-1">
                           <span>CPU</span>
                           <span className="font-mono">
-                            {node.connectionStatus === 'online' && node.systemInfo 
-                              ? `${node.systemInfo.cpuUsage.toFixed(1)}%` 
+                            {node.connectionStatus === 'online' && node.systemInfo
+                              ? `${node.systemInfo.cpuUsage.toFixed(1)}%`
                               : '-'
                             }
                           </span>
@@ -723,8 +723,8 @@ export default function NodePage() {
                         <div className="flex justify-between text-xs mb-1">
                           <span>内存</span>
                           <span className="font-mono">
-                            {node.connectionStatus === 'online' && node.systemInfo 
-                              ? `${node.systemInfo.memoryUsage.toFixed(1)}%` 
+                            {node.connectionStatus === 'online' && node.systemInfo
+                              ? `${node.systemInfo.memoryUsage.toFixed(1)}%`
                               : '-'
                             }
                           </span>
@@ -745,8 +745,8 @@ export default function NodePage() {
                       <div className="text-center p-2 bg-default-50 dark:bg-default-100 rounded">
                         <div className="text-default-600 mb-0.5">上传</div>
                         <div className="font-mono">
-                          {node.connectionStatus === 'online' && node.systemInfo 
-                            ? formatSpeed(node.systemInfo.uploadSpeed) 
+                          {node.connectionStatus === 'online' && node.systemInfo
+                            ? formatSpeed(node.systemInfo.uploadSpeed)
                             : '-'
                           }
                         </div>
@@ -754,8 +754,8 @@ export default function NodePage() {
                       <div className="text-center p-2 bg-default-50 dark:bg-default-100 rounded">
                         <div className="text-default-600 mb-0.5">下载</div>
                         <div className="font-mono">
-                          {node.connectionStatus === 'online' && node.systemInfo 
-                            ? formatSpeed(node.systemInfo.downloadSpeed) 
+                          {node.connectionStatus === 'online' && node.systemInfo
+                            ? formatSpeed(node.systemInfo.downloadSpeed)
                             : '-'
                           }
                         </div>
@@ -767,8 +767,8 @@ export default function NodePage() {
                       <div className="text-center p-2 bg-primary-50 dark:bg-primary-100/20 rounded border border-primary-200 dark:border-primary-300/20">
                         <div className="text-primary-600 dark:text-primary-400 mb-0.5">↑ 上行流量</div>
                         <div className="font-mono text-primary-700 dark:text-primary-300">
-                          {node.connectionStatus === 'online' && node.systemInfo 
-                            ? formatTraffic(node.systemInfo.uploadTraffic) 
+                          {node.connectionStatus === 'online' && node.systemInfo
+                            ? formatTraffic(node.systemInfo.uploadTraffic)
                             : '-'
                           }
                         </div>
@@ -776,8 +776,8 @@ export default function NodePage() {
                       <div className="text-center p-2 bg-success-50 dark:bg-success-100/20 rounded border border-success-200 dark:border-success-300/20">
                         <div className="text-success-600 dark:text-success-400 mb-0.5">↓ 下行流量</div>
                         <div className="font-mono text-success-700 dark:text-success-300">
-                          {node.connectionStatus === 'online' && node.systemInfo 
-                            ? formatTraffic(node.systemInfo.downloadTraffic) 
+                          {node.connectionStatus === 'online' && node.systemInfo
+                            ? formatTraffic(node.systemInfo.downloadTraffic)
                             : '-'
                           }
                         </div>
@@ -825,8 +825,8 @@ export default function NodePage() {
         )}
 
         {/* 新增/编辑节点对话框 */}
-        <Modal 
-          isOpen={dialogVisible} 
+        <Modal
+          isOpen={dialogVisible}
           onClose={() => setDialogVisible(false)}
           size="2xl"
           scrollBehavior="outside"
@@ -975,7 +975,7 @@ export default function NodePage() {
                         description="请不要在出口节点执行屏蔽协议，否则可能影响转发；屏蔽协议仅需在入口节点执行。"
                         className="mt-3"
                       />
-                
+
                 <Alert
                         color="primary"
                         variant="flat"
@@ -1003,7 +1003,7 @@ export default function NodePage() {
         </Modal>
 
         {/* 删除确认模态框 */}
-        <Modal 
+        <Modal
           isOpen={deleteModalOpen}
           onOpenChange={setDeleteModalOpen}
           size="2xl"
@@ -1025,8 +1025,8 @@ export default function NodePage() {
                   <Button variant="light" onPress={onClose}>
                     取消
                   </Button>
-                  <Button 
-                    color="danger" 
+                  <Button
+                    color="danger"
                     onPress={confirmDelete}
                     isLoading={deleteLoading}
                   >
@@ -1039,8 +1039,8 @@ export default function NodePage() {
         </Modal>
 
         {/* 安装命令模态框 */}
-        <Modal 
-          isOpen={installCommandModal} 
+        <Modal
+          isOpen={installCommandModal}
           onClose={() => setInstallCommandModal(false)}
           size="2xl"
         scrollBehavior="outside"
@@ -1092,6 +1092,6 @@ export default function NodePage() {
           </ModalContent>
         </Modal>
       </div>
-    
+
   );
-} 
+}

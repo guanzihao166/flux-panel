@@ -31,6 +31,19 @@ public class ViteConfigController extends BaseController {
         return viteConfigService.getConfigs();
     }
 
+    @LogAnnotation
+    @PostMapping("/login-security")
+    public R getLoginSecurityConfig() {
+        return viteConfigService.getLoginSecurityConfig();
+    }
+
+    @LogAnnotation
+    @RequireRole
+    @PostMapping("/admin/list")
+    public R getAdminConfigs() {
+        return viteConfigService.getAdminConfigs();
+    }
+
     /**
      * 根据配置名获取配置值
      * 前端无需权限即可访问，用于获取特定配置
@@ -39,6 +52,7 @@ public class ViteConfigController extends BaseController {
     @PostMapping("/get")
     public R getConfigByName(@RequestBody Map<String, Object> params) {
         String name = params.get("name").toString();
+        if ("turnstile_secret_key".equals(name)) return R.err(403, "该配置不可公开读取");
         return viteConfigService.getConfigByName(name);
     }
 

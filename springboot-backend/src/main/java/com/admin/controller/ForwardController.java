@@ -86,6 +86,17 @@ public class ForwardController extends BaseController {
         return forwardService.diagnoseForward(forwardId);
     }
 
+    @PostMapping("/probe")
+    public R probeForward(@RequestBody Map<String, Object> params) {
+        return forwardService.probeForward(Long.valueOf(params.get("forwardId").toString()));
+    }
+
+    @RequireRole
+    @PostMapping("/probe-all")
+    public R probeAllForwards() {
+        return forwardService.probeAllForwards();
+    }
+
     /**
      * 更新转发排序
      * @param params 包含forwards数组的参数，每个元素包含id和inx

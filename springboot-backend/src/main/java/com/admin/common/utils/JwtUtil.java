@@ -20,12 +20,12 @@ import java.util.Map;
  */
 @Component
 public class JwtUtil {
-    
+
     @Value("${jwt-secret}")
     private String secretKey;
-    
+
     private static String SECRET_KEY;
-    
+
     // token有效期，7天
     private static final long EXPIRE_TIME = 90L * 24 * 60 * 60 * 1000;
     // 算法
@@ -111,7 +111,7 @@ public class JwtUtil {
             Map<String, Object> payload = JSON.parseObject(decodedPayload, Map.class);
             long exp = Long.parseLong(payload.get("exp").toString());
             long now = System.currentTimeMillis() / 1000;
-            
+
             return exp > now;
         } catch (Exception e) {
             return false;
@@ -191,4 +191,4 @@ public class JwtUtil {
         byte[] signatureBytes = hmac.doFinal(content.getBytes(StandardCharsets.UTF_8));
         return Base64.getUrlEncoder().withoutPadding().encodeToString(signatureBytes);
     }
-} 
+}

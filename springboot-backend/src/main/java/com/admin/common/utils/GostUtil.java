@@ -8,6 +8,8 @@ import com.alibaba.fastjson.JSONObject;
 import org.apache.commons.lang3.StringUtils;
 import org.aspectj.apache.bcel.generic.RET;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 public class GostUtil {
@@ -33,20 +35,30 @@ public class GostUtil {
     }
 
     public static GostDto AddService(Long node_id, String name, Integer in_port, Integer limiter, String remoteAddr, Integer fow_type, Tunnel tunnel, String strategy, String interfaceName) {
+        return AddService(node_id, name, in_port, limiter, remoteAddr, fow_type, tunnel, strategy, interfaceName, null);
+    }
+
+    public static GostDto AddService(Long node_id, String name, Integer in_port, Integer limiter, String remoteAddr,
+                                     Integer fow_type, Tunnel tunnel, String strategy, String interfaceName, String weights) {
         JSONArray services = new JSONArray();
         String[] protocols = {"tcp", "udp"};
         for (String protocol : protocols) {
-            JSONObject service = createServiceConfig(name, in_port, limiter, remoteAddr, protocol, fow_type, tunnel, strategy, interfaceName);
+            JSONObject service = createServiceConfig(name, in_port, limiter, remoteAddr, protocol, fow_type, tunnel, strategy, interfaceName, weights);
             services.add(service);
         }
         return WebSocketServer.send_msg(node_id, services, "AddService");
     }
 
     public static GostDto UpdateService(Long node_id, String name, Integer in_port, Integer limiter, String remoteAddr, Integer fow_type, Tunnel tunnel, String strategy, String interfaceName) {
+        return UpdateService(node_id, name, in_port, limiter, remoteAddr, fow_type, tunnel, strategy, interfaceName, null);
+    }
+
+    public static GostDto UpdateService(Long node_id, String name, Integer in_port, Integer limiter, String remoteAddr,
+                                        Integer fow_type, Tunnel tunnel, String strategy, String interfaceName, String weights) {
         JSONArray services = new JSONArray();
         String[] protocols = {"tcp", "udp"};
         for (String protocol : protocols) {
-            JSONObject service = createServiceConfig(name, in_port, limiter, remoteAddr, protocol, fow_type, tunnel, strategy, interfaceName);
+            JSONObject service = createServiceConfig(name, in_port, limiter, remoteAddr, protocol, fow_type, tunnel, strategy, interfaceName, weights);
             services.add(service);
         }
         return WebSocketServer.send_msg(node_id, services, "UpdateService");
@@ -62,6 +74,17 @@ public class GostUtil {
     }
 
     public static GostDto AddRemoteService(Long node_id, String name, Integer out_port, String remoteAddr,  String protocol, String strategy, String interfaceName) {
+        return AddRemoteService(node_id, name, out_port, remoteAddr, protocol, strategy, interfaceName, null, 1, 30);
+    }
+
+    public static GostDto AddRemoteService(Long node_id, String name, Integer out_port, String remoteAddr, String protocol,
+                                           String strategy, String interfaceName, String weights, Integer maxFails, Integer failTimeout) {
+        return AddRemoteService(node_id, name, out_port, remoteAddr, protocol, strategy, interfaceName, weights, maxFails, failTimeout, true);
+    }
+
+    private static GostDto AddRemoteService(Long node_id, String name, Integer out_port, String remoteAddr, String protocol,
+                                            String strategy, String interfaceName, String weights, Integer maxFails,
+                                            Integer failTimeout, boolean withForwarder) {
         JSONObject data = new JSONObject();
         data.put("name", name + "_tls");
         data.put("addr", ":" + out_port);
@@ -79,35 +102,25 @@ public class GostUtil {
         JSONObject listener = new JSONObject();
         listener.put("type", protocol);
         data.put("listener", listener);
-        JSONObject forwarder = new JSONObject();
-        JSONArray nodes = new JSONArray();
-
-        String[] split = remoteAddr.split(",");
-        int num = 1;
-        for (String addr : split) {
-            JSONObject node = new JSONObject();
-            node.put("name", "node_" + num );
-            node.put("addr", addr);
-            nodes.add(node);
-            num ++;
+        if (withForwarder) {
+            JSONObject forwarder = new JSONObject();
+            JSONArray nodes = new JSONArray();
+            appendWeightedForwardNodes(nodes, remoteAddr, weights, strategy);
+            forwarder.put("nodes", nodes);
+            forwarder.put("selector", createSelector(strategy, maxFails, failTimeout));
+            data.put("forwarder", forwarder);
         }
-        if (strategy == null || strategy.equals("")){
-            strategy = "fifo";
-        }
-        forwarder.put("nodes", nodes);
-        JSONObject selector = new JSONObject();
-        selector.put("strategy", strategy);
-        selector.put("maxFails", 1);
-        selector.put("failTimeout", "600s");
-        forwarder.put("selector", selector);
-
-        data.put("forwarder", forwarder);
         JSONArray services = new JSONArray();
         services.add(data);
         return WebSocketServer.send_msg(node_id, services, "AddService");
     }
 
     public static GostDto UpdateRemoteService(Long node_id, String name, Integer out_port, String remoteAddr,String protocol, String strategy, String interfaceName) {
+        return UpdateRemoteService(node_id, name, out_port, remoteAddr, protocol, strategy, interfaceName, null, 1, 30);
+    }
+
+    public static GostDto UpdateRemoteService(Long node_id, String name, Integer out_port, String remoteAddr, String protocol,
+                                              String strategy, String interfaceName, String weights, Integer maxFails, Integer failTimeout) {
         JSONObject data = new JSONObject();
         data.put("name", name + "_tls");
         data.put("addr", ":" + out_port);
@@ -127,25 +140,9 @@ public class GostUtil {
         data.put("listener", listener);
         JSONObject forwarder = new JSONObject();
         JSONArray nodes = new JSONArray();
-
-        String[] split = remoteAddr.split(",");
-        int num = 1;
-        for (String addr : split) {
-            JSONObject node = new JSONObject();
-            node.put("name", "node_" + num );
-            node.put("addr", addr);
-            nodes.add(node);
-            num ++;
-        }
-        if (strategy == null || strategy.equals("")){
-            strategy = "fifo";
-        }
+        appendWeightedForwardNodes(nodes, remoteAddr, weights, strategy);
         forwarder.put("nodes", nodes);
-        JSONObject selector = new JSONObject();
-        selector.put("strategy", strategy);
-        selector.put("maxFails", 1);
-        selector.put("failTimeout", "600s");
-        forwarder.put("selector", selector);
+        forwarder.put("selector", createSelector(strategy, maxFails, failTimeout));
 
         data.put("forwarder", forwarder);
         JSONArray services = new JSONArray();
@@ -283,6 +280,70 @@ public class GostUtil {
        return WebSocketServer.send_msg(node_id, req, "UpdateChains");
     }
 
+    public static GostDto AddRelayService(Long nodeId, String name, Integer port, String protocol, String interfaceName) {
+        return AddRemoteService(nodeId, name, port, "127.0.0.1:9", protocol, "fifo", interfaceName, null, 1, 30, false);
+    }
+
+    public static GostDto AddChains(Long nodeId, String name, List<String> hopAddresses, String protocol,
+                                    String interfaceName, String strategy, List<Integer> weights,
+                                    Integer maxFails, Integer failTimeout) {
+        JSONObject data = buildChainConfig(name, hopAddresses, protocol, interfaceName, strategy, weights, maxFails, failTimeout);
+        return WebSocketServer.send_msg(nodeId, data, "AddChains");
+    }
+
+    public static GostDto UpdateChains(Long nodeId, String name, List<String> hopAddresses, String protocol,
+                                       String interfaceName, String strategy, List<Integer> weights,
+                                       Integer maxFails, Integer failTimeout) {
+        JSONObject req = new JSONObject();
+        req.put("chain", name + "_chains");
+        req.put("data", buildChainConfig(name, hopAddresses, protocol, interfaceName, strategy, weights, maxFails, failTimeout));
+        return WebSocketServer.send_msg(nodeId, req, "UpdateChains");
+    }
+
+    private static JSONObject buildChainConfig(String name, List<String> hopAddresses, String protocol,
+                                               String interfaceName, String strategy, List<Integer> weights,
+                                               Integer maxFails, Integer failTimeout) {
+        JSONArray hops = new JSONArray();
+        for (int hopIndex = 0; hopIndex < hopAddresses.size(); hopIndex++) {
+            String alternatives = hopAddresses.get(hopIndex);
+            JSONArray nodes = new JSONArray();
+            String[] addresses = alternatives.split(",");
+            List<Integer> normalizedWeights = normalizeWeights(weights, addresses.length);
+            int sequence = 1;
+            for (int i = 0; i < addresses.length; i++) {
+                int copies = "wrr".equals(strategy) ? Math.min(normalizedWeights.get(i), 100) : 1;
+                for (int copy = 0; copy < copies; copy++) {
+                    JSONObject node = new JSONObject();
+                    node.put("name", "node-" + name + "-" + hopIndex + "-" + sequence++);
+                    node.put("addr", addresses[i].trim());
+                    JSONObject connector = new JSONObject();
+                    connector.put("type", "relay");
+                    node.put("connector", connector);
+                    JSONObject dialer = new JSONObject();
+                    dialer.put("type", protocol);
+                    if (Objects.equals(protocol, "quic")) {
+                        JSONObject metadata = new JSONObject();
+                        metadata.put("keepAlive", true);
+                        metadata.put("ttl", "10s");
+                        dialer.put("metadata", metadata);
+                    }
+                    node.put("dialer", dialer);
+                    if (StringUtils.isNotBlank(interfaceName) && hopIndex == 0) node.put("interface", interfaceName);
+                    nodes.add(node);
+                }
+            }
+            JSONObject hop = new JSONObject();
+            hop.put("name", "hop-" + name + "-" + hopIndex);
+            hop.put("nodes", nodes);
+            hop.put("selector", createSelector(strategy, maxFails, failTimeout));
+            hops.add(hop);
+        }
+        JSONObject data = new JSONObject();
+        data.put("name", name + "_chains");
+        data.put("hops", hops);
+        return data;
+    }
+
     public static GostDto DeleteChains(Long node_id, String name) {
         JSONObject data = new JSONObject();
         data.put("chain", name + "_chains");
@@ -298,7 +359,7 @@ public class GostUtil {
         return data;
     }
 
-    private static JSONObject createServiceConfig(String name, Integer in_port, Integer limiter, String remoteAddr, String protocol, Integer fow_type, Tunnel tunnel, String strategy, String interfaceName) {
+    private static JSONObject createServiceConfig(String name, Integer in_port, Integer limiter, String remoteAddr, String protocol, Integer fow_type, Tunnel tunnel, String strategy, String interfaceName, String weights) {
         JSONObject service = new JSONObject();
         service.put("name", name + "_" + protocol);
         if (Objects.equals(protocol, "tcp")){
@@ -329,7 +390,7 @@ public class GostUtil {
 
         // 端口转发需要配置转发器
         if (isPortForwarding(fow_type)) {
-            JSONObject forwarder = createForwarder(remoteAddr, strategy);
+            JSONObject forwarder = createForwarder(remoteAddr, strategy, weights);
             service.put("forwarder", forwarder);
         }
         return service;
@@ -358,32 +419,58 @@ public class GostUtil {
         return listener;
     }
 
-    private static JSONObject createForwarder(String remoteAddr, String strategy) {
+    private static JSONObject createForwarder(String remoteAddr, String strategy, String weights) {
         JSONObject forwarder = new JSONObject();
         JSONArray nodes = new JSONArray();
-
-        String[] split = remoteAddr.split(",");
-        int num = 1;
-        for (String addr : split) {
-            JSONObject node = new JSONObject();
-            node.put("name", "node_" + num );
-            node.put("addr", addr);
-            nodes.add(node);
-            num ++;
-        }
-
-        if (strategy == null || strategy.equals("")){
-            strategy = "fifo";
-        }
-
+        appendWeightedForwardNodes(nodes, remoteAddr, weights, strategy);
         forwarder.put("nodes", nodes);
-
-        JSONObject selector = new JSONObject();
-        selector.put("strategy", strategy);
-        selector.put("maxFails", 1);
-        selector.put("failTimeout", "600s");
-        forwarder.put("selector", selector);
+        forwarder.put("selector", createSelector(strategy, 1, 30));
         return forwarder;
+    }
+
+    private static JSONObject createSelector(String strategy, Integer maxFails, Integer failTimeout) {
+        JSONObject selector = new JSONObject();
+        selector.put("strategy", StringUtils.isBlank(strategy) ? "fifo" : strategy);
+        selector.put("maxFails", maxFails == null || maxFails < 1 ? 1 : maxFails);
+        selector.put("failTimeout", (failTimeout == null || failTimeout < 5 ? 30 : failTimeout) + "s");
+        return selector;
+    }
+
+    private static void appendWeightedForwardNodes(JSONArray nodes, String remoteAddr, String weights, String strategy) {
+        String[] addresses = remoteAddr.split(",");
+        List<Integer> normalized = normalizeWeights(weights, addresses.length);
+        int sequence = 1;
+        for (int i = 0; i < addresses.length; i++) {
+            int copies = "wrr".equals(strategy) ? Math.min(normalized.get(i), 100) : 1;
+            for (int copy = 0; copy < copies; copy++) {
+                JSONObject node = new JSONObject();
+                node.put("name", "node_" + sequence++);
+                node.put("addr", addresses[i].trim());
+                nodes.add(node);
+            }
+        }
+    }
+
+    private static List<Integer> normalizeWeights(List<Integer> weights, int count) {
+        List<Integer> result = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            int weight = i < weights.size() ? weights.get(i) : 1;
+            result.add(Math.max(1, Math.min(weight, 100)));
+        }
+        return result;
+    }
+
+    private static List<Integer> normalizeWeights(String weights, int count) {
+        List<Integer> result = new ArrayList<>();
+        String[] values = StringUtils.defaultString(weights).split(",");
+        for (int i = 0; i < count; i++) {
+            int weight = 1;
+            if (i < values.length) {
+                try { weight = Integer.parseInt(values[i].trim()); } catch (NumberFormatException ignored) { weight = 1; }
+            }
+            result.add(Math.max(1, Math.min(weight, 100)));
+        }
+        return result;
     }
 
     private static boolean isPortForwarding(Integer fow_type) {

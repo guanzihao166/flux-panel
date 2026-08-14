@@ -43,7 +43,12 @@ CREATE TABLE `forward` (
   `created_time` bigint(20) NOT NULL,
   `updated_time` bigint(20) NOT NULL,
   `status` int(10) NOT NULL,
-  `inx` int(10) NOT NULL DEFAULT '0'
+  `inx` int(10) NOT NULL DEFAULT '0',
+  `latency_ms` double DEFAULT NULL,
+  `probe_status` int(10) NOT NULL DEFAULT '0',
+  `probe_time` bigint(20) DEFAULT NULL,
+  `probe_message` varchar(255) DEFAULT NULL,
+  `target_weights` varchar(1000) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- --------------------------------------------------------
@@ -121,6 +126,12 @@ CREATE TABLE `tunnel` (
   `tcp_listen_addr` varchar(100) NOT NULL DEFAULT '[::]',
   `udp_listen_addr` varchar(100) NOT NULL DEFAULT '[::]',
   `interface_name` varchar(200) DEFAULT NULL,
+  `out_node_ids` varchar(1000) DEFAULT NULL,
+  `out_node_weights` varchar(1000) DEFAULT NULL,
+  `chain_node_ids` varchar(1000) DEFAULT NULL,
+  `balance_strategy` varchar(20) NOT NULL DEFAULT 'fifo',
+  `max_fails` int(10) NOT NULL DEFAULT '1',
+  `fail_timeout` int(10) NOT NULL DEFAULT '30',
   `created_time` bigint(20) NOT NULL,
   `updated_time` bigint(20) NOT NULL,
   `status` int(10) NOT NULL
@@ -193,7 +204,27 @@ CREATE TABLE `vite_config` (
 --
 
 INSERT INTO `vite_config` (`id`, `name`, `value`, `time`) VALUES
-(1, 'app_name', 'flux', 1755147963000);
+(1, 'app_name', 'flux', 1755147963000),
+(2, 'turnstile_enabled', 'true', 1755147963000),
+(3, 'turnstile_site_key', '', 1755147963000),
+(4, 'turnstile_secret_key', '', 1755147963000);
+
+CREATE TABLE `announcement` (
+  `id` int(10) NOT NULL,
+  `title` varchar(200) NOT NULL,
+  `content` longtext NOT NULL,
+  `status` int(10) NOT NULL DEFAULT '0',
+  `published_time` bigint(20) DEFAULT NULL,
+  `created_time` bigint(20) NOT NULL,
+  `updated_time` bigint(20) DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE `announcement_dismissal` (
+  `id` int(10) NOT NULL,
+  `announcement_id` int(10) NOT NULL,
+  `user_id` int(10) NOT NULL,
+  `created_time` bigint(20) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 --
 -- 转储表的索引
@@ -248,6 +279,15 @@ ALTER TABLE `vite_config`
   ADD PRIMARY KEY (`id`),
   ADD UNIQUE KEY `name` (`name`);
 
+ALTER TABLE `announcement`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_announcement_status_published` (`status`,`published_time`);
+
+ALTER TABLE `announcement_dismissal`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `uk_announcement_user` (`announcement_id`,`user_id`),
+  ADD KEY `idx_announcement_dismissal_user` (`user_id`);
+
 --
 -- 在导出的表使用AUTO_INCREMENT
 --
@@ -298,7 +338,13 @@ ALTER TABLE `user_tunnel`
 -- 使用表AUTO_INCREMENT `vite_config`
 --
 ALTER TABLE `vite_config`
-  MODIFY `id` int(10) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+  MODIFY `id` int(10) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=5;
+
+ALTER TABLE `announcement`
+  MODIFY `id` int(10) NOT NULL AUTO_INCREMENT;
+
+ALTER TABLE `announcement_dismissal`
+  MODIFY `id` int(10) NOT NULL AUTO_INCREMENT;
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;

@@ -18,6 +18,8 @@ func ParseChainSelector(cfg *config.SelectorConfig) selector.Selector[chain.Chai
 		strategy = xs.RoundRobinStrategy[chain.Chainer]()
 	case "random", "rand":
 		strategy = xs.RandomStrategy[chain.Chainer]()
+	case "wrr", "weighted":
+		strategy = xs.SmoothWeightedRoundRobinStrategy[chain.Chainer]()
 	case "fifo", "ha":
 		strategy = xs.FIFOStrategy[chain.Chainer]()
 	case "hash":
@@ -43,6 +45,8 @@ func ParseNodeSelector(cfg *config.SelectorConfig) selector.Selector[*chain.Node
 		strategy = xs.RoundRobinStrategy[*chain.Node]()
 	case "random", "rand":
 		strategy = xs.RandomStrategy[*chain.Node]()
+	case "wrr", "weighted":
+		strategy = xs.SmoothWeightedRoundRobinStrategy[*chain.Node]()
 	case "fifo", "ha":
 		strategy = xs.FIFOStrategy[*chain.Node]()
 	case "hash":

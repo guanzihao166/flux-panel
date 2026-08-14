@@ -59,7 +59,7 @@ export function isLoggedIn(): boolean {
  * @returns 包装后的函数
  */
 export function requireAdmin<T extends (...args: any[]) => any>(
-  fn: T, 
+  fn: T,
   errorMsg: string = '权限不足，仅管理员可操作'
 ): T {
   return ((...args: Parameters<T>) => {
@@ -69,4 +69,4 @@ export function requireAdmin<T extends (...args: any[]) => any>(
     }
     return fn(...args);
   }) as T;
-} 
+}

@@ -16,6 +16,8 @@ import javax.annotation.Resource;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
+import java.util.HashSet;
 
 @Slf4j
 @Service
@@ -49,6 +51,7 @@ public class CheckGostConfigAsync {
             cleanOrphanedServices(gostConfig, node);
             cleanOrphanedChains(gostConfig, node);
             cleanOrphanedLimiters(gostConfig, node);
+            syncRequiredForwardConfigs(gostConfig, node);
         }
     }
 
@@ -105,7 +108,7 @@ public class CheckGostConfigAsync {
         if (gostConfig.getChains() == null) {
             return;
         }
-        
+
 
         for (ConfigItem chain : gostConfig.getChains()) {
             safeExecute(() -> {
@@ -115,7 +118,7 @@ public class CheckGostConfigAsync {
                     String userId = serviceIds[1];
                     String userTunnelId = serviceIds[2];
                     String type = serviceIds[3];
-                    
+
                     if (Objects.equals(type, "chains")) {
                         Forward forward = forwardService.getById(forwardId);
                         if (forward == null) {
@@ -128,6 +131,39 @@ public class CheckGostConfigAsync {
         }
     }
 
+    private void syncRequiredForwardConfigs(GostConfigDto gostConfig, Node node) {
+        Set<String> serviceNames = new HashSet<>();
+        if (gostConfig.getServices() != null) for (ConfigItem item : gostConfig.getServices()) serviceNames.add(item.getName());
+        Set<String> chainNames = new HashSet<>();
+        if (gostConfig.getChains() != null) for (ConfigItem item : gostConfig.getChains()) chainNames.add(item.getName());
+        for (Forward forward : forwardService.list(new QueryWrapper<Forward>().eq("status", 1))) {
+            Tunnel tunnel = tunnelService.getById(forward.getTunnelId());
+            if (tunnel == null || !routeContainsNode(tunnel, node.getId())) continue;
+            String prefix = forward.getId() + "_" + forward.getUserId() + "_";
+            boolean missing = tunnel.getInNodeId().equals(node.getId())
+                    ? serviceNames.stream().noneMatch(n -> n.startsWith(prefix) && n.endsWith("_tcp"))
+                    : serviceNames.stream().noneMatch(n -> n.startsWith(prefix) && n.endsWith("_tls"));
+            if (tunnel.getInNodeId().equals(node.getId()) && tunnel.getType() == 2) {
+                missing = missing || chainNames.stream().noneMatch(n -> n.startsWith(prefix) && n.endsWith("_chains"));
+            }
+            if (missing) {
+                log.info("节点 {} 缺少转发 {} 配置，触发完整路由重建", node.getId(), forward.getId());
+                forwardService.updateForwardA(forward);
+            }
+        }
+    }
+
+    private boolean routeContainsNode(Tunnel tunnel, Long nodeId) {
+        if (nodeId.equals(tunnel.getInNodeId()) || nodeId.equals(tunnel.getOutNodeId())) return true;
+        return csvContains(tunnel.getChainNodeIds(), nodeId) || csvContains(tunnel.getOutNodeIds(), nodeId);
+    }
+
+    private boolean csvContains(String csv, Long nodeId) {
+        if (csv == null) return false;
+        for (String value : csv.split(",")) if (String.valueOf(nodeId).equals(value.trim())) return true;
+        return false;
+    }
+
     /**
      * 清理孤立的限流器
      */
@@ -135,7 +171,7 @@ public class CheckGostConfigAsync {
         if (gostConfig.getLimiters() == null) {
             return;
         }
-        
+
 
         for (ConfigItem limiter : gostConfig.getLimiters()) {
             safeExecute(() -> {

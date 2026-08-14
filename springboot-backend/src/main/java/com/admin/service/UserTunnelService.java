@@ -23,14 +23,14 @@ public interface UserTunnelService extends IService<UserTunnel> {
      * @return 结果
      */
     R assignUserTunnel(UserTunnelDto userTunnelDto);
-    
+
     /**
      * 查询用户隧道权限列表
      * @param queryDto 查询条件
      * @return 结果
      */
     R getUserTunnelList(UserTunnelQueryDto queryDto);
-    
+
     /**
      * 删除用户隧道权限
      * @param id ID
@@ -38,7 +38,7 @@ public interface UserTunnelService extends IService<UserTunnel> {
      */
     R removeUserTunnel(Integer id);
 
-    
+
     /**
      * 更新用户隧道权限（包含流量、流量重置时间、到期时间）
      * @param updateDto 更新数据

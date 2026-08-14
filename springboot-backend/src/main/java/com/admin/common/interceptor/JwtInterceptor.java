@@ -28,7 +28,7 @@ public class JwtInterceptor implements HandlerInterceptor {
             throw new UnauthorizedException("无效的token或token已过期");
         }
 
-        
+
         return true;
     }
-} 
+}

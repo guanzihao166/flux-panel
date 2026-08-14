@@ -8,9 +8,11 @@ export LC_ALL=C
 
 
 # 全局下载地址配置
-DOCKER_COMPOSEV4_URL="https://github.com/bqlpfy/flux-panel/releases/download/1.4.3/docker-compose-v4.yml"
-DOCKER_COMPOSEV6_URL="https://github.com/bqlpfy/flux-panel/releases/download/1.4.3/docker-compose-v6.yml"
-GOST_SQL_URL="https://github.com/bqlpfy/flux-panel/releases/download/1.4.3/gost.sql"
+DOCKER_COMPOSEV4_URL="https://github.com/guanzihao166/flux-panel/releases/download/1.6.0/docker-compose-v4.yml"
+DOCKER_COMPOSEV6_URL="https://github.com/guanzihao166/flux-panel/releases/download/1.6.0/docker-compose-v6.yml"
+GOST_SQL_URL="https://github.com/guanzihao166/flux-panel/releases/download/1.6.0/gost.sql"
+SOURCE_ARCHIVE_URL="https://github.com/guanzihao166/flux-panel/archive/refs/tags/1.6.0.tar.gz"
+SOURCE_DIR="flux-panel-src-1.6.0"
 
 COUNTRY=$(curl -s https://ipinfo.io/country)
 if [ "$COUNTRY" = "CN" ]; then
@@ -18,6 +20,7 @@ if [ "$COUNTRY" = "CN" ]; then
     DOCKER_COMPOSEV4_URL="https://ghfast.top/${DOCKER_COMPOSEV4_URL}"
     DOCKER_COMPOSEV6_URL="https://ghfast.top/${DOCKER_COMPOSEV6_URL}"
     GOST_SQL_URL="https://ghfast.top/${GOST_SQL_URL}"
+    SOURCE_ARCHIVE_URL="https://ghfast.top/${SOURCE_ARCHIVE_URL}"
 fi
 
 
@@ -47,6 +50,24 @@ check_docker() {
     exit 1
   fi
   echo "检测到 Docker 命令：$DOCKER_CMD"
+}
+
+# 构建面板镜像
+build_panel_images() {
+  echo "🔽 下载面板源码..."
+  curl -L -o flux-panel-src.tar.gz "$SOURCE_ARCHIVE_URL"
+  rm -rf "$SOURCE_DIR"
+  mkdir -p "$SOURCE_DIR"
+  tar -xzf flux-panel-src.tar.gz -C "$SOURCE_DIR" --strip-components=1
+
+  echo "🔨 构建后端镜像 flux-panel/backend:1.6.0..."
+  docker build -t flux-panel/backend:1.6.0 "$SOURCE_DIR/springboot-backend"
+
+  echo "🔨 构建前端镜像 flux-panel/frontend:1.6.0..."
+  docker build -t flux-panel/frontend:1.6.0 "$SOURCE_DIR/vite-frontend"
+
+  rm -rf "$SOURCE_DIR" flux-panel-src.tar.gz
+  echo "✅ 面板镜像构建完成"
 }
 
 # 检测系统是否支持 IPv6
@@ -207,6 +228,8 @@ install_panel() {
   fi
   echo "✅ 文件准备完成"
 
+  build_panel_images
+
   # 自动检测并配置 IPv6 支持
   if check_ipv6_support; then
     echo "🚀 系统支持 IPv6，自动启用 IPv6 配置..."
@@ -255,8 +278,7 @@ update_panel() {
   echo "🛑 停止当前服务..."
   $DOCKER_CMD down
 
-  echo "⬇️ 拉取最新镜像..."
-  $DOCKER_CMD pull
+  build_panel_images
 
   echo "🚀 启动更新后的服务..."
   $DOCKER_CMD up -d
@@ -903,6 +925,177 @@ DEALLOCATE PREPARE stmt;
 UPDATE \`statistics_flow\`
 SET \`created_time\` = UNIX_TIMESTAMP() * 1000
 WHERE \`created_time\` = 0 OR \`created_time\` IS NULL;
+
+-- forward 表：添加拨测字段（如果不存在）
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'forward' AND column_name = 'latency_ms'),
+    'ALTER TABLE \`forward\` ADD COLUMN \`latency_ms\` DOUBLE DEFAULT NULL AFTER \`inx\`;',
+    'SELECT "Column \`latency_ms\` already exists in \`forward\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'forward' AND column_name = 'probe_status'),
+    'ALTER TABLE \`forward\` ADD COLUMN \`probe_status\` INT(10) NOT NULL DEFAULT 0 AFTER \`latency_ms\`;',
+    'SELECT "Column \`probe_status\` already exists in \`forward\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'forward' AND column_name = 'probe_time'),
+    'ALTER TABLE \`forward\` ADD COLUMN \`probe_time\` BIGINT(20) DEFAULT NULL AFTER \`probe_status\`;',
+    'SELECT "Column \`probe_time\` already exists in \`forward\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'forward' AND column_name = 'probe_message'),
+    'ALTER TABLE \`forward\` ADD COLUMN \`probe_message\` VARCHAR(255) DEFAULT NULL AFTER \`probe_time\`;',
+    'SELECT "Column \`probe_message\` already exists in \`forward\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'forward' AND column_name = 'target_weights'),
+    'ALTER TABLE \`forward\` ADD COLUMN \`target_weights\` VARCHAR(1000) DEFAULT NULL AFTER \`probe_message\`;',
+    'SELECT "Column \`target_weights\` already exists in \`forward\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+UPDATE \`forward\`
+SET \`target_weights\` = TRIM(BOTH ',' FROM REPEAT('1,', 1 + LENGTH(\`remote_addr\`) - LENGTH(REPLACE(\`remote_addr\`, ',', ''))))
+WHERE \`target_weights\` IS NULL;
+
+-- tunnel 表：添加多出口和转发链字段（如果不存在）
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'tunnel' AND column_name = 'out_node_ids'),
+    'ALTER TABLE \`tunnel\` ADD COLUMN \`out_node_ids\` VARCHAR(1000) DEFAULT NULL AFTER \`interface_name\`;',
+    'SELECT "Column \`out_node_ids\` already exists in \`tunnel\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'tunnel' AND column_name = 'out_node_weights'),
+    'ALTER TABLE \`tunnel\` ADD COLUMN \`out_node_weights\` VARCHAR(1000) DEFAULT NULL AFTER \`out_node_ids\`;',
+    'SELECT "Column \`out_node_weights\` already exists in \`tunnel\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'tunnel' AND column_name = 'chain_node_ids'),
+    'ALTER TABLE \`tunnel\` ADD COLUMN \`chain_node_ids\` VARCHAR(1000) DEFAULT NULL AFTER \`out_node_weights\`;',
+    'SELECT "Column \`chain_node_ids\` already exists in \`tunnel\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'tunnel' AND column_name = 'balance_strategy'),
+    'ALTER TABLE \`tunnel\` ADD COLUMN \`balance_strategy\` VARCHAR(20) NOT NULL DEFAULT "fifo" AFTER \`chain_node_ids\`;',
+    'SELECT "Column \`balance_strategy\` already exists in \`tunnel\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'tunnel' AND column_name = 'max_fails'),
+    'ALTER TABLE \`tunnel\` ADD COLUMN \`max_fails\` INT(10) NOT NULL DEFAULT 1 AFTER \`balance_strategy\`;',
+    'SELECT "Column \`max_fails\` already exists in \`tunnel\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (SELECT 1 FROM information_schema.COLUMNS WHERE table_schema = DATABASE() AND table_name = 'tunnel' AND column_name = 'fail_timeout'),
+    'ALTER TABLE \`tunnel\` ADD COLUMN \`fail_timeout\` INT(10) NOT NULL DEFAULT 30 AFTER \`max_fails\`;',
+    'SELECT "Column \`fail_timeout\` already exists in \`tunnel\`";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+UPDATE \`tunnel\`
+SET \`out_node_ids\` = CAST(\`out_node_id\` AS CHAR),
+    \`out_node_weights\` = '1',
+    \`chain_node_ids\` = '',
+    \`balance_strategy\` = 'fifo',
+    \`max_fails\` = 1,
+    \`fail_timeout\` = 30
+WHERE \`out_node_ids\` IS NULL;
+
+-- 创建公告相关表（如果不存在）
+CREATE TABLE IF NOT EXISTS \`announcement\` (
+  \`id\` int(10) NOT NULL AUTO_INCREMENT,
+  \`title\` varchar(200) NOT NULL,
+  \`content\` longtext NOT NULL,
+  \`status\` int(10) NOT NULL DEFAULT 0,
+  \`published_time\` bigint(20) DEFAULT NULL,
+  \`created_time\` bigint(20) NOT NULL,
+  \`updated_time\` bigint(20) DEFAULT NULL,
+  PRIMARY KEY (\`id\`),
+  KEY \`idx_announcement_status_published\` (\`status\`,\`published_time\`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS \`announcement_dismissal\` (
+  \`id\` int(10) NOT NULL AUTO_INCREMENT,
+  \`announcement_id\` int(10) NOT NULL,
+  \`user_id\` int(10) NOT NULL,
+  \`created_time\` bigint(20) NOT NULL,
+  PRIMARY KEY (\`id\`),
+  UNIQUE KEY \`uk_announcement_user\` (\`announcement_id\`,\`user_id\`),
+  KEY \`idx_announcement_dismissal_user\` (\`user_id\`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO \`vite_config\` (\`name\`, \`value\`, \`time\`)
+SELECT 'turnstile_enabled', 'true', UNIX_TIMESTAMP(CURRENT_TIMESTAMP(3)) * 1000
+WHERE NOT EXISTS (SELECT 1 FROM \`vite_config\` WHERE \`name\` = 'turnstile_enabled');
+
+INSERT INTO \`vite_config\` (\`name\`, \`value\`, \`time\`)
+SELECT 'turnstile_site_key', '', UNIX_TIMESTAMP(CURRENT_TIMESTAMP(3)) * 1000
+WHERE NOT EXISTS (SELECT 1 FROM \`vite_config\` WHERE \`name\` = 'turnstile_site_key');
+
+INSERT INTO \`vite_config\` (\`name\`, \`value\`, \`time\`)
+SELECT 'turnstile_secret_key', '', UNIX_TIMESTAMP(CURRENT_TIMESTAMP(3)) * 1000
+WHERE NOT EXISTS (SELECT 1 FROM \`vite_config\` WHERE \`name\` = 'turnstile_secret_key');
 
 EOF
 

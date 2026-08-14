@@ -35,4 +35,4 @@ public class NodeUpdateDto {
     private Integer http;
     private Integer tls;
     private Integer socks;
-} 
+}

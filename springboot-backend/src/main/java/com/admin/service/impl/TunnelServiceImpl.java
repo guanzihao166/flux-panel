@@ -45,24 +45,24 @@ import java.util.stream.Collectors;
 public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> implements TunnelService {
 
     // ========== 常量定义 ==========
-    
+
     /** 隧道类型常量 */
     private static final int TUNNEL_TYPE_PORT_FORWARD = 1;  // 端口转发
     private static final int TUNNEL_TYPE_TUNNEL_FORWARD = 2; // 隧道转发
-    
+
     /** 隧道状态常量 */
     private static final int TUNNEL_STATUS_ACTIVE = 1;      // 启用状态
-    
+
     /** 节点状态常量 */
     private static final int NODE_STATUS_ONLINE = 1;        // 节点在线状态
-    
+
     /** 用户角色常量 */
     private static final int ADMIN_ROLE_ID = 0;             // 管理员角色ID
-    
+
     /** 成功响应消息 */
     private static final String SUCCESS_CREATE_MSG = "隧道创建成功";
     private static final String SUCCESS_DELETE_MSG = "隧道删除成功";
-    
+
     /** 错误响应消息 */
     private static final String ERROR_CREATE_MSG = "隧道创建失败";
     private static final String ERROR_DELETE_MSG = "隧道删除失败";
@@ -78,22 +78,22 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
     private static final String ERROR_NO_AVAILABLE_TUNNELS = "暂无可用隧道";
     private static final String ERROR_IN_NODE_OFFLINE = "入口节点当前离线，请确保节点正常运行";
     private static final String ERROR_OUT_NODE_OFFLINE = "出口节点当前离线，请确保节点正常运行";
-    
+
     /** 使用检查相关消息 */
     private static final String ERROR_FORWARDS_IN_USE = "该隧道还有 %d 个转发在使用，请先删除相关转发";
     private static final String ERROR_USER_PERMISSIONS_IN_USE = "该隧道还有 %d 个用户权限关联，请先取消用户权限分配";
 
     // ========== 依赖注入 ==========
-    
+
     @Resource
     UserTunnelMapper userTunnelMapper;
 
     @Resource
     NodeService nodeService;
-    
+
     @Resource
     ForwardService forwardService;
-    
+
     @Resource
     UserTunnelService userTunnelService;
 
@@ -102,7 +102,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
     /**
      * 创建隧道
      * 支持端口转发和隧道转发两种模式
-     * 
+     *
      * @param tunnelDto 隧道创建数据传输对象
      * @return 创建结果响应
      */
@@ -122,6 +122,12 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
             }
         }
 
+        R routingValidation = validateRoutingConfig(tunnelDto.getInNodeId(), tunnelDto.getType(),
+                tunnelDto.getOutNodeId(), tunnelDto.getOutNodeIds(), tunnelDto.getOutNodeWeights(),
+                tunnelDto.getChainNodeIds(), tunnelDto.getBalanceStrategy(), tunnelDto.getMaxFails(),
+                tunnelDto.getFailTimeout());
+        if (routingValidation.getCode() != 0) return routingValidation;
+
         // 3. 验证入口节点和端口
         NodeValidationResult inNodeValidation = validateInNode(tunnelDto);
         if (inNodeValidation.isHasError()) {
@@ -140,13 +146,13 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         // 6. 设置默认属性并保存
         setDefaultTunnelProperties(tunnel);
         boolean result = this.save(tunnel);
-        
+
         return result ? R.ok(SUCCESS_CREATE_MSG) : R.err(ERROR_CREATE_MSG);
     }
 
     /**
      * 获取所有隧道列表
-     * 
+     *
      * @return 包含所有隧道的响应对象
      */
     @Override
@@ -157,7 +163,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
 
     /**
      * 更新隧道（只允许修改名称、流量计费、端口范围）
-     * 
+     *
      * @param tunnelUpdateDto 更新数据传输对象
      * @return 更新结果响应
      */
@@ -174,11 +180,19 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         if (nameValidationResult.getCode() != 0) {
             return nameValidationResult;
         }
+        Tunnel oldTopology = new Tunnel();
+        BeanUtils.copyProperties(existingTunnel, oldTopology);
         int up = 0;
         if (!Objects.equals(existingTunnel.getTcpListenAddr(), tunnelUpdateDto.getTcpListenAddr()) ||
                 !Objects.equals(existingTunnel.getUdpListenAddr(), tunnelUpdateDto.getUdpListenAddr()) ||
                 !Objects.equals(existingTunnel.getProtocol(), tunnelUpdateDto.getProtocol()) ||
-                !Objects.equals(existingTunnel.getInterfaceName(), tunnelUpdateDto.getInterfaceName())) {
+                !Objects.equals(existingTunnel.getInterfaceName(), tunnelUpdateDto.getInterfaceName()) ||
+                !Objects.equals(existingTunnel.getOutNodeIds(), tunnelUpdateDto.getOutNodeIds()) ||
+                !Objects.equals(existingTunnel.getOutNodeWeights(), tunnelUpdateDto.getOutNodeWeights()) ||
+                !Objects.equals(existingTunnel.getChainNodeIds(), tunnelUpdateDto.getChainNodeIds()) ||
+                !Objects.equals(existingTunnel.getBalanceStrategy(), tunnelUpdateDto.getBalanceStrategy()) ||
+                !Objects.equals(existingTunnel.getMaxFails(), tunnelUpdateDto.getMaxFails()) ||
+                !Objects.equals(existingTunnel.getFailTimeout(), tunnelUpdateDto.getFailTimeout())) {
             up++;
         }
 
@@ -190,24 +204,23 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         existingTunnel.setUdpListenAddr(tunnelUpdateDto.getUdpListenAddr());
         existingTunnel.setTrafficRatio(tunnelUpdateDto.getTrafficRatio());
         existingTunnel.setProtocol(tunnelUpdateDto.getProtocol());
+        R routingValidation = validateRoutingConfig(existingTunnel.getInNodeId(), existingTunnel.getType(),
+                existingTunnel.getOutNodeId(), tunnelUpdateDto.getOutNodeIds(), tunnelUpdateDto.getOutNodeWeights(),
+                tunnelUpdateDto.getChainNodeIds(), tunnelUpdateDto.getBalanceStrategy(), tunnelUpdateDto.getMaxFails(),
+                tunnelUpdateDto.getFailTimeout());
+        if (routingValidation.getCode() != 0) return routingValidation;
         existingTunnel.setInterfaceName(tunnelUpdateDto.getInterfaceName());
+        applyRoutingConfig(existingTunnel, tunnelUpdateDto.getOutNodeIds(), tunnelUpdateDto.getOutNodeWeights(),
+                tunnelUpdateDto.getChainNodeIds(), tunnelUpdateDto.getBalanceStrategy(), tunnelUpdateDto.getMaxFails(),
+                tunnelUpdateDto.getFailTimeout());
         this.updateById(existingTunnel);
         int err = 0;
         if (up != 0){
-            System.out.println("123123");
+            System.out.println("隧道路由配置已变化，开始同步关联转发: " + existingTunnel.getId());
             List<Forward> tunnel = forwardService.list(new QueryWrapper<Forward>().eq("tunnel_id", tunnelUpdateDto.getId()));
             if (!tunnel.isEmpty()) {
                 for (Forward forward : tunnel) {
-                    ForwardUpdateDto forwardUpdateDto = new ForwardUpdateDto();
-                    forwardUpdateDto.setId(forward.getId());
-                    forwardUpdateDto.setUserId(forward.getUserId());
-                    forwardUpdateDto.setName(forward.getName());
-                    forwardUpdateDto.setTunnelId(forward.getTunnelId());
-                    forwardUpdateDto.setRemoteAddr(forward.getRemoteAddr());
-                    forwardUpdateDto.setStrategy(forward.getStrategy());
-                    forwardUpdateDto.setInPort(forward.getInPort());
-                    forwardUpdateDto.setInterfaceName(forward.getInterfaceName());
-                    R r = forwardService.updateForward(forwardUpdateDto);
+                    R r = forwardService.rebuildForwardRoute(forward, oldTopology, existingTunnel);
                     if (r.getCode() != 0){
                         err++;
                     }
@@ -224,7 +237,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
     /**
      * 删除隧道
      * 删除前会检查是否有转发或用户权限在使用该隧道
-     * 
+     *
      * @param id 隧道ID
      * @return 删除结果响应
      */
@@ -249,16 +262,16 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
     /**
      * 获取用户可用的隧道列表
      * 管理员可以看到所有启用的隧道，普通用户只能看到有权限的启用隧道
-     * 
+     *
      * @return 用户可用隧道列表响应
      */
     @Override
     public R userTunnel() {
         UserInfo currentUser = getCurrentUserInfo();
-        
+
         // 根据用户角色获取隧道列表
         List<Tunnel> tunnelEntities = getUserAccessibleTunnels(currentUser);
-        
+
         // 转换为DTO并返回
         List<TunnelListDto> tunnelDtos = convertToTunnelListDtos(tunnelEntities);
         return R.ok(tunnelDtos);
@@ -268,7 +281,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
 
     /**
      * 获取当前用户信息
-     * 
+     *
      * @return 用户信息对象
      */
     private UserInfo getCurrentUserInfo() {
@@ -279,7 +292,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
 
     /**
      * 验证隧道名称唯一性
-     * 
+     *
      * @param tunnelName 隧道名称
      * @return 验证结果响应
      */
@@ -293,7 +306,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
 
     /**
      * 验证隧道名称唯一性（更新时使用，排除自身）
-     * 
+     *
      * @param tunnelName 隧道名称
      * @param tunnelId 隧道ID（要排除的隧道）
      * @return 验证结果响应
@@ -318,16 +331,84 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
      * @return 验证结果响应
      */
     private R validateTunnelForwardCreate(TunnelDto tunnelDto) {
-        // 验证出口节点不能为空
-        if (tunnelDto.getOutNodeId() == null) {
+        if (tunnelDto.getOutNodeId() == null && StringUtils.isBlank(tunnelDto.getOutNodeIds())) {
             return R.err(ERROR_OUT_NODE_REQUIRED);
         }
         return R.ok();
     }
 
+    private R validateRoutingConfig(Long inNodeId, Integer type, Long legacyOutNodeId, String outNodeIds,
+                                    String outNodeWeights, String chainNodeIds, String strategy,
+                                    Integer maxFails, Integer failTimeout) {
+        if (!Arrays.asList("fifo", "round", "wrr").contains(StringUtils.defaultIfBlank(strategy, "fifo"))) {
+            return R.err("负载策略只支持故障切换、轮询或加权轮询");
+        }
+        if (maxFails != null && (maxFails < 1 || maxFails > 10)) return R.err("失败阈值必须在 1-10 之间");
+        if (failTimeout != null && (failTimeout < 5 || failTimeout > 3600)) return R.err("故障恢复时间必须在 5-3600 秒之间");
+        List<Long> outputs = parseNodeIds(outNodeIds);
+        if (type == TUNNEL_TYPE_TUNNEL_FORWARD && outputs.isEmpty() && legacyOutNodeId != null) outputs.add(legacyOutNodeId);
+        if (type == TUNNEL_TYPE_TUNNEL_FORWARD && outputs.isEmpty()) return R.err(ERROR_OUT_NODE_REQUIRED);
+        List<Integer> weights = parseWeights(outNodeWeights, outputs.size());
+        if (weights.size() != outputs.size()) return R.err("出口节点数量与权重数量不一致");
+        Set<Long> seen = new HashSet<>();
+        seen.add(inNodeId);
+        for (Long nodeId : parseNodeIds(chainNodeIds)) {
+            if (!seen.add(nodeId)) return R.err("入口、中继和出口节点不能重复");
+            if (nodeService.getById(nodeId) == null) return R.err("中继节点不存在: " + nodeId);
+        }
+        for (Long nodeId : outputs) {
+            if (!seen.add(nodeId)) return R.err("入口、中继和出口节点不能重复");
+            if (nodeService.getById(nodeId) == null) return R.err("出口节点不存在: " + nodeId);
+        }
+        return R.ok();
+    }
+
+    private void applyRoutingConfig(Tunnel tunnel, String outNodeIds, String outNodeWeights, String chainNodeIds,
+                                    String strategy, Integer maxFails, Integer failTimeout) {
+        List<Long> outputs = parseNodeIds(outNodeIds);
+        if (tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD && outputs.isEmpty() && tunnel.getOutNodeId() != null) {
+            outputs.add(tunnel.getOutNodeId());
+        }
+        tunnel.setOutNodeIds(outputs.stream().map(String::valueOf).collect(Collectors.joining(",")));
+        tunnel.setOutNodeWeights(parseWeights(outNodeWeights, outputs.size()).stream().map(String::valueOf).collect(Collectors.joining(",")));
+        tunnel.setChainNodeIds(parseNodeIds(chainNodeIds).stream().map(String::valueOf).collect(Collectors.joining(",")));
+        tunnel.setBalanceStrategy(StringUtils.defaultIfBlank(strategy, "fifo"));
+        tunnel.setMaxFails(maxFails == null ? 1 : maxFails);
+        tunnel.setFailTimeout(failTimeout == null ? 30 : failTimeout);
+        if (!outputs.isEmpty()) {
+            tunnel.setOutNodeId(outputs.get(0));
+            Node primary = nodeService.getById(outputs.get(0));
+            if (primary != null) tunnel.setOutIp(primary.getServerIp());
+        }
+    }
+
+    private List<Long> parseNodeIds(String value) {
+        if (StringUtils.isBlank(value)) return new ArrayList<>();
+        List<Long> result = new ArrayList<>();
+        for (String item : value.split(",")) {
+            if (StringUtils.isBlank(item)) continue;
+            try { result.add(Long.parseLong(item.trim())); } catch (NumberFormatException ignored) { }
+        }
+        return result;
+    }
+
+    private List<Integer> parseWeights(String value, int count) {
+        List<Integer> result = new ArrayList<>();
+        String[] values = StringUtils.defaultString(value).split(",");
+        for (int i = 0; i < count; i++) {
+            int weight = 1;
+            if (i < values.length && StringUtils.isNotBlank(values[i])) {
+                try { weight = Integer.parseInt(values[i].trim()); } catch (NumberFormatException ignored) { return new ArrayList<>(); }
+            }
+            if (weight < 1 || weight > 100) return new ArrayList<>();
+            result.add(weight);
+        }
+        return result;
+    }
+
     /**
      * 验证入口节点和端口
-     * 
+     *
      * @param tunnelDto 隧道创建DTO
      * @return 节点验证结果
      */
@@ -348,7 +429,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
 
     /**
      * 构建隧道实体对象
-     * 
+     *
      * @param tunnelDto 隧道创建DTO
      * @param inNode 入口节点
      * @return 构建完成的隧道对象
@@ -356,21 +437,21 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
     private Tunnel buildTunnelEntity(TunnelDto tunnelDto, Node inNode) {
         Tunnel tunnel = new Tunnel();
         BeanUtils.copyProperties(tunnelDto, tunnel);
-        
+
         // 设置入口节点信息
         tunnel.setInNodeId(tunnelDto.getInNodeId());
         tunnel.setInIp(inNode.getIp());
-        
+
         // 设置流量计算类型
         tunnel.setFlow(tunnelDto.getFlow());
-        
+
         // 设置流量倍率，如果为空则设置默认值1.0
         if (tunnelDto.getTrafficRatio() != null) {
             tunnel.setTrafficRatio(tunnelDto.getTrafficRatio());
         } else {
             tunnel.setTrafficRatio(new BigDecimal("1.0"));
         }
-        
+
         // 设置协议类型（仅隧道转发需要）
         if (tunnelDto.getType() == TUNNEL_TYPE_TUNNEL_FORWARD) {
             // 隧道转发时，设置协议类型，默认为tls
@@ -380,19 +461,23 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
             // 端口转发时，协议类型为null
             tunnel.setProtocol(null);
         }
-        
+
+        applyRoutingConfig(tunnel, tunnelDto.getOutNodeIds(), tunnelDto.getOutNodeWeights(),
+                tunnelDto.getChainNodeIds(), tunnelDto.getBalanceStrategy(), tunnelDto.getMaxFails(),
+                tunnelDto.getFailTimeout());
+
         // 设置TCP和UDP监听地址
-        tunnel.setTcpListenAddr(StrUtil.isNotBlank(tunnelDto.getTcpListenAddr()) ? 
+        tunnel.setTcpListenAddr(StrUtil.isNotBlank(tunnelDto.getTcpListenAddr()) ?
                                tunnelDto.getTcpListenAddr() : "0.0.0.0");
-        tunnel.setUdpListenAddr(StrUtil.isNotBlank(tunnelDto.getUdpListenAddr()) ? 
+        tunnel.setUdpListenAddr(StrUtil.isNotBlank(tunnelDto.getUdpListenAddr()) ?
                                tunnelDto.getUdpListenAddr() : "0.0.0.0");
-        
+
         return tunnel;
     }
 
     /**
      * 设置出口节点参数
-     * 
+     *
      * @param tunnel 隧道对象
      * @param tunnelDto 隧道创建DTO
      * @return 设置结果响应
@@ -409,7 +494,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
 
     /**
      * 设置端口转发的出口参数
-     * 
+     *
      * @param tunnel 隧道对象
      * @param tunnelDto 隧道创建DTO
      * @return 设置结果响应
@@ -422,48 +507,36 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
 
     /**
      * 设置隧道转发的出口参数
-     * 
+     *
      * @param tunnel 隧道对象
      * @param tunnelDto 隧道创建DTO
      * @return 设置结果响应
      */
     private R setupTunnelForwardOutParameters(Tunnel tunnel, TunnelDto tunnelDto) {
-        // 验证出口节点不能为空
-        if (tunnelDto.getOutNodeId() == null) {
-            return R.err(ERROR_OUT_NODE_REQUIRED);
-        }
-        
-        // 验证入口和出口不能是同一个节点
-        if (tunnelDto.getInNodeId().equals(tunnelDto.getOutNodeId())) {
-            return R.err(ERROR_SAME_NODE_NOT_ALLOWED);
-        }
-        
+        List<Long> outputIds = parseNodeIds(tunnelDto.getOutNodeIds());
+        if (outputIds.isEmpty() && tunnelDto.getOutNodeId() != null) outputIds.add(tunnelDto.getOutNodeId());
+        if (outputIds.isEmpty()) return R.err(ERROR_OUT_NODE_REQUIRED);
+
         // 验证协议类型
         String protocol = tunnelDto.getProtocol();
         if (StrUtil.isBlank(protocol)) {
             return R.err("协议类型必选");
         }
-        
-        // 验证出口节点是否存在
-        Node outNode = nodeService.getById(tunnelDto.getOutNodeId());
-        if (outNode == null) {
-            return R.err(ERROR_OUT_NODE_NOT_FOUND);
-        }
-        
-        // 验证出口节点是否在线
-        if (outNode.getStatus() != NODE_STATUS_ONLINE) {
-            return R.err(ERROR_OUT_NODE_OFFLINE);
-        }
-        // 设置出口参数
-        tunnel.setOutNodeId(tunnelDto.getOutNodeId());
-        tunnel.setOutIp(outNode.getServerIp());
-        
+
+        Node primary = nodeService.getById(outputIds.get(0));
+        if (primary == null) return R.err(ERROR_OUT_NODE_NOT_FOUND);
+        boolean anyOnline = outputIds.stream().map(nodeService::getById).filter(Objects::nonNull)
+                .anyMatch(node -> node.getStatus() == NODE_STATUS_ONLINE);
+        if (!anyOnline) return R.err("所有出口节点均离线，至少需要一个在线出口完成初始配置");
+        tunnel.setOutNodeId(primary.getId());
+        tunnel.setOutIp(primary.getServerIp());
+
         return R.ok();
     }
 
     /**
      * 设置隧道默认属性
-     * 
+     *
      * @param tunnel 隧道对象
      */
     private void setDefaultTunnelProperties(Tunnel tunnel) {
@@ -475,7 +548,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
 
     /**
      * 检查隧道是否存在
-     * 
+     *
      * @param tunnelId 隧道ID
      * @return 隧道是否存在
      */
@@ -485,7 +558,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
 
     /**
      * 检查隧道使用情况
-     * 
+     *
      * @param tunnelId 隧道ID
      * @return 检查结果响应
      */
@@ -502,7 +575,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
 
     /**
      * 检查转发使用情况
-     * 
+     *
      * @param tunnelId 隧道ID
      * @return 检查结果响应
      */
@@ -510,18 +583,18 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         QueryWrapper<Forward> forwardQuery = new QueryWrapper<>();
         forwardQuery.eq("tunnel_id", tunnelId);
         long forwardCount = forwardService.count(forwardQuery);
-        
+
         if (forwardCount > 0) {
             String errorMsg = String.format(ERROR_FORWARDS_IN_USE, forwardCount);
             return R.err(errorMsg);
         }
-        
+
         return R.ok();
     }
 
     /**
      * 检查用户权限使用情况
-     * 
+     *
      * @param tunnelId 隧道ID
      * @return 检查结果响应
      */
@@ -529,18 +602,18 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         QueryWrapper<UserTunnel> userTunnelQuery = new QueryWrapper<>();
         userTunnelQuery.eq("tunnel_id", tunnelId);
         long userTunnelCount = userTunnelService.count(userTunnelQuery);
-        
+
         if (userTunnelCount > 0) {
             String errorMsg = String.format(ERROR_USER_PERMISSIONS_IN_USE, userTunnelCount);
             return R.err(errorMsg);
         }
-        
+
         return R.ok();
     }
 
     /**
      * 获取用户可访问的隧道列表
-     * 
+     *
      * @param userInfo 用户信息
      * @return 隧道列表
      */
@@ -556,7 +629,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
 
     /**
      * 获取所有启用状态的隧道
-     * 
+     *
      * @return 启用状态的隧道列表
      */
     private List<Tunnel> getActiveTunnels() {
@@ -565,7 +638,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
 
     /**
      * 获取用户有权限的启用隧道
-     * 
+     *
      * @param userId 用户ID
      * @return 用户有权限的隧道列表
      */
@@ -573,15 +646,15 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         List<UserTunnel> userTunnels = userTunnelMapper.selectList(
             new QueryWrapper<UserTunnel>().eq("user_id", userId)
         );
-        
+
         if (userTunnels.isEmpty()) {
             return java.util.Collections.emptyList(); // 返回空列表
         }
-        
+
         List<Integer> tunnelIds = userTunnels.stream()
                 .map(UserTunnel::getTunnelId)
                 .collect(Collectors.toList());
-                
+
         return this.list(new QueryWrapper<Tunnel>()
                 .in("id", tunnelIds)
                 .eq("status", TUNNEL_STATUS_ACTIVE));
@@ -589,7 +662,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
 
     /**
      * 将隧道实体列表转换为DTO列表
-     * 
+     *
      * @param tunnelEntities 隧道实体列表
      * @return 隧道DTO列表
      */
@@ -601,7 +674,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
 
     /**
      * 将Tunnel实体转换为TunnelListDto
-     * 
+     *
      * @param tunnel 隧道实体
      * @return 隧道列表DTO
      */
@@ -612,7 +685,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         dto.setIp(tunnel.getInIp());
         dto.setType(tunnel.getType());
         dto.setProtocol(tunnel.getProtocol());
-        
+
         // 获取入口节点的端口范围信息
         if (tunnel.getInNodeId() != null) {
             Node inNode = nodeService.getById(tunnel.getInNodeId());
@@ -621,13 +694,13 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
                 dto.setInNodePortEnd(inNode.getPortEnd());
             }
         }
-        
+
         return dto;
     }
 
     /**
      * 隧道诊断功能
-     * 
+     *
      * @param tunnelId 隧道ID
      * @return 诊断结果响应
      */
@@ -685,7 +758,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
     /**
      * 获取出口节点的TCP端口
      * 通过隧道ID查找转发服务的出口端口，如果没有则使用默认SSH端口22
-     * 
+     *
      * @param tunnelId 隧道ID
      * @return TCP端口号
      */
@@ -700,7 +773,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
 
     /**
      * 执行TCP ping诊断
-     * 
+     *
      * @param node 执行TCP ping的节点
      * @param targetIp 目标IP地址
      * @param port 目标端口
@@ -718,7 +791,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
 
             // 发送TCP ping命令到节点
             GostDto gostResult = WebSocketServer.send_msg(node.getId(), tcpPingData, "TcpPing");
-            
+
             DiagnosisResult result = new DiagnosisResult();
             result.setNodeId(node.getId());
             result.setNodeName(node.getName());
@@ -733,7 +806,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
                     if (gostResult.getData() != null) {
                         JSONObject tcpPingResponse = (JSONObject) gostResult.getData();
                         boolean success = tcpPingResponse.getBooleanValue("success");
-                        
+
                         result.setSuccess(success);
                         if (success) {
                             result.setMessage("TCP连接成功");
@@ -784,7 +857,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
 
     /**
      * 执行TCP ping诊断（带连接状态检查）
-     * 
+     *
      * @param node 执行TCP ping的节点
      * @param targetIp 目标IP地址
      * @param port 目标端口

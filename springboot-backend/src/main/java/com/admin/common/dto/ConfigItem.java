@@ -7,5 +7,3 @@ import lombok.Data;
 public class ConfigItem {
     private String name;
 }
-
-

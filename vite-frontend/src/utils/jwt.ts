@@ -18,10 +18,10 @@ interface JWTPayload {
 function getPayloadFromToken(token: string): JWTPayload | null {
   try {
     if (!token) return null;
-    
+
     const parts = token.split('.');
     if (parts.length !== 3) return null;
-    
+
     const encodedPayload = parts[1];
     const decodedPayload = atob(encodedPayload);
     return JSON.parse(decodedPayload) as JWTPayload;
@@ -68,7 +68,7 @@ export function getUsernameFromToken(token: string): string | null {
 export function isTokenValid(token: string): boolean {
   const payload = getPayloadFromToken(token);
   if (!payload) return false;
-  
+
   const now = Math.floor(Date.now() / 1000);
   return payload.exp > now;
 }
@@ -83,7 +83,7 @@ export const JwtUtil = {
     const token = localStorage.getItem('token');
     return token ? getUserIdFromToken(token) : null;
   },
-  
+
   /**
    * 从localStorage获取token并解析角色ID
    * @returns 角色ID
@@ -92,7 +92,7 @@ export const JwtUtil = {
     const token = localStorage.getItem('token');
     return token ? getRoleIdFromToken(token) : null;
   },
-  
+
   /**
    * 从localStorage获取token并解析用户名
    * @returns 用户名
@@ -101,7 +101,7 @@ export const JwtUtil = {
     const token = localStorage.getItem('token');
     return token ? getUsernameFromToken(token) : null;
   },
-  
+
   /**
    * 验证localStorage中的token是否有效
    * @returns 是否有效
@@ -110,4 +110,4 @@ export const JwtUtil = {
     const token = localStorage.getItem('token');
     return token ? isTokenValid(token) : false;
   }
-}; 
+};

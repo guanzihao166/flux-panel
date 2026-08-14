@@ -34,4 +34,4 @@ public class BaseEntity implements Serializable {
      * 状态（0：正常，1：删除）
      */
     private Integer status;
-} 
+}

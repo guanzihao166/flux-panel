@@ -70,4 +70,20 @@ public class Tunnel extends BaseEntity {
     private String udpListenAddr;
 
     private String interfaceName;
+
+    /** 逗号分隔的出口节点，首项与 outNodeId 保持兼容。 */
+    private String outNodeIds;
+
+    /** 与 outNodeIds 对齐的正整数权重。 */
+    private String outNodeWeights;
+
+    /** 按顺序经过的中继 agents。 */
+    private String chainNodeIds;
+
+    /** fifo/round/wrr。 */
+    private String balanceStrategy;
+
+    private Integer maxFails;
+
+    private Integer failTimeout;
 }

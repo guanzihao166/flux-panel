@@ -13,15 +13,15 @@ public class ForwardDto {
 
     @NotBlank(message = "转发名称不能为空")
     private String name;
-    
+
     @NotNull(message = "隧道ID不能为空")
     private Integer tunnelId;
-    
+
     @NotBlank(message = "远程地址不能为空")
     private String remoteAddr;
 
     private String strategy;
-    
+
     /**
      * 入口端口（可选，为空时自动分配）
      */
@@ -31,4 +31,6 @@ public class ForwardDto {
 
     private String interfaceName;
 
-} 
+    private String targetWeights;
+
+}

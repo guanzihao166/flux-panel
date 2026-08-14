@@ -32,16 +32,18 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 
 
-import { 
-  createForward, 
-  getForwardList, 
-  updateForward, 
+import {
+  createForward,
+  getForwardList,
+  updateForward,
   deleteForward,
   forceDeleteForward,
-  userTunnel, 
+  userTunnel,
   pauseForwardService,
   resumeForwardService,
   diagnoseForward,
+  probeForward,
+  probeAllForwards,
   updateForwardOrder
 } from "@/api";
 import { JwtUtil } from "@/utils/jwt";
@@ -64,6 +66,11 @@ interface Forward {
   userName?: string;
   userId?: number;
   inx?: number;
+  latencyMs?: number | null;
+  probeStatus?: number;
+  probeTime?: number | null;
+  probeMessage?: string;
+  targetWeights?: string;
 }
 
 interface Tunnel {
@@ -82,6 +89,7 @@ interface ForwardForm {
   remoteAddr: string;
   interfaceName?: string;
   strategy: string;
+  targetWeights: string;
 }
 
 interface AddressItem {
@@ -123,21 +131,21 @@ export default function ForwardPage() {
   const [loading, setLoading] = useState(true);
   const [forwards, setForwards] = useState<Forward[]>([]);
   const [tunnels, setTunnels] = useState<Tunnel[]>([]);
-  
+
   // 检测是否为移动端
   const [isMobile, setIsMobile] = useState(false);
-  
+
   useEffect(() => {
     const checkMobile = () => {
       setIsMobile(window.innerWidth < 768);
     };
-    
+
     checkMobile();
     window.addEventListener('resize', checkMobile);
-    
+
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
-  
+
   // 显示模式状态 - 从localStorage读取，默认为平铺显示
   const [viewMode, setViewMode] = useState<'grouped' | 'direct'>(() => {
     try {
@@ -147,10 +155,10 @@ export default function ForwardPage() {
       return 'direct';
     }
   });
-  
+
   // 拖拽排序相关状态
   const [forwardOrder, setForwardOrder] = useState<number[]>([]);
-  
+
   // 模态框状态
   const [modalOpen, setModalOpen] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
@@ -160,18 +168,19 @@ export default function ForwardPage() {
   const [submitLoading, setSubmitLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [diagnosisLoading, setDiagnosisLoading] = useState(false);
+  const [probeAllLoading, setProbeAllLoading] = useState(false);
   const [forwardToDelete, setForwardToDelete] = useState<Forward | null>(null);
   const [currentDiagnosisForward, setCurrentDiagnosisForward] = useState<Forward | null>(null);
   const [diagnosisResult, setDiagnosisResult] = useState<DiagnosisResult | null>(null);
   const [addressModalTitle, setAddressModalTitle] = useState('');
   const [addressList, setAddressList] = useState<AddressItem[]>([]);
-  
+
   // 导出相关状态
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [exportData, setExportData] = useState('');
   const [exportLoading, setExportLoading] = useState(false);
   const [selectedTunnelForExport, setSelectedTunnelForExport] = useState<number | null>(null);
-  
+
   // 导入相关状态
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importData, setImportData] = useState('');
@@ -183,7 +192,7 @@ export default function ForwardPage() {
     message: string;
     forwardName?: string;
   }>>([]);
-  
+
   // 表单状态
   const [form, setForm] = useState<ForwardForm>({
     name: '',
@@ -191,9 +200,10 @@ export default function ForwardPage() {
     inPort: null,
     remoteAddr: '',
     interfaceName: '',
-    strategy: 'fifo'
+    strategy: 'fifo',
+    targetWeights: ''
   });
-  
+
   // 表单验证错误
   const [errors, setErrors] = useState<{[key: string]: string}>({});
   const [selectedTunnel, setSelectedTunnel] = useState<Tunnel | null>(null);
@@ -208,7 +218,7 @@ export default function ForwardPage() {
     setViewMode(newMode);
     try {
       localStorage.setItem('forward-view-mode', newMode);
-      
+
       // 切换到直接显示模式时，初始化拖拽排序顺序
       if (newMode === 'direct') {
         // 在平铺模式下，只对当前用户的转发进行排序
@@ -217,17 +227,17 @@ export default function ForwardPage() {
         if (currentUserId !== null) {
           userForwards = forwards.filter((f: Forward) => f.userId === currentUserId);
         }
-        
+
         // 检查数据库中是否有排序信息
         const hasDbOrdering = userForwards.some((f: Forward) => f.inx !== undefined && f.inx !== 0);
-        
+
         if (hasDbOrdering) {
           // 使用数据库中的排序信息
           const dbOrder = userForwards
             .sort((a: Forward, b: Forward) => (a.inx ?? 0) - (b.inx ?? 0))
             .map((f: Forward) => f.id);
           setForwardOrder(dbOrder);
-          
+
           // 同步到localStorage
           try {
             localStorage.setItem('forward-order', JSON.stringify(dbOrder));
@@ -240,7 +250,7 @@ export default function ForwardPage() {
           if (savedOrder) {
             try {
               const orderIds = JSON.parse(savedOrder);
-              const validOrder = orderIds.filter((id: number) => 
+              const validOrder = orderIds.filter((id: number) =>
                 userForwards.some((f: Forward) => f.id === id)
               );
               userForwards.forEach((forward: Forward) => {
@@ -270,14 +280,14 @@ export default function ForwardPage() {
         getForwardList(),
         userTunnel()
       ]);
-      
+
       if (forwardsRes.code === 0) {
         const forwardsData = forwardsRes.data?.map((forward: any) => ({
           ...forward,
           serviceRunning: forward.status === 1
         })) || [];
         setForwards(forwardsData);
-        
+
         // 初始化拖拽排序顺序
         if (viewMode === 'direct') {
           // 在平铺模式下，只对当前用户的转发进行排序
@@ -286,17 +296,17 @@ export default function ForwardPage() {
           if (currentUserId !== null) {
             userForwards = forwardsData.filter((f: Forward) => f.userId === currentUserId);
           }
-          
+
           // 检查数据库中是否有排序信息
           const hasDbOrdering = userForwards.some((f: Forward) => f.inx !== undefined && f.inx !== 0);
-          
+
           if (hasDbOrdering) {
             // 使用数据库中的排序信息
             const dbOrder = userForwards
               .sort((a: Forward, b: Forward) => (a.inx ?? 0) - (b.inx ?? 0))
               .map((f: Forward) => f.id);
             setForwardOrder(dbOrder);
-            
+
             // 同步到localStorage
             try {
               localStorage.setItem('forward-order', JSON.stringify(dbOrder));
@@ -310,7 +320,7 @@ export default function ForwardPage() {
               try {
                 const orderIds = JSON.parse(savedOrder);
                 // 验证保存的顺序是否仍然有效（只包含当前用户的转发）
-                const validOrder = orderIds.filter((id: number) => 
+                const validOrder = orderIds.filter((id: number) =>
                   userForwards.some((f: Forward) => f.id === id)
                 );
                 // 添加新的转发ID（如果存在）
@@ -331,7 +341,7 @@ export default function ForwardPage() {
       } else {
         toast.error(forwardsRes.msg || '获取转发列表失败');
       }
-      
+
       if (tunnelsRes.code === 0) {
         setTunnels(tunnelsRes.data || []);
       } else {
@@ -348,14 +358,14 @@ export default function ForwardPage() {
   // 按用户和隧道分组转发数据
   const groupForwardsByUserAndTunnel = (): UserGroup[] => {
     const userMap = new Map<string, UserGroup>();
-    
+
     // 获取排序后的转发列表
     const sortedForwards = getSortedForwards();
-    
+
     sortedForwards.forEach(forward => {
       const userKey = forward.userId ? forward.userId.toString() : 'unknown';
       const userName = forward.userName || '未知用户';
-      
+
       if (!userMap.has(userKey)) {
         userMap.set(userKey, {
           userId: forward.userId || null,
@@ -363,10 +373,10 @@ export default function ForwardPage() {
           tunnelGroups: []
         });
       }
-      
+
       const userGroup = userMap.get(userKey)!;
       let tunnelGroup = userGroup.tunnelGroups.find(tg => tg.tunnelId === forward.tunnelId);
-      
+
       if (!tunnelGroup) {
         tunnelGroup = {
           tunnelId: forward.tunnelId,
@@ -375,34 +385,34 @@ export default function ForwardPage() {
         };
         userGroup.tunnelGroups.push(tunnelGroup);
       }
-      
+
       tunnelGroup.forwards.push(forward);
     });
-    
+
     // 排序：先按用户名，再按隧道名
     const result = Array.from(userMap.values());
     result.sort((a, b) => a.userName.localeCompare(b.userName));
     result.forEach(userGroup => {
       userGroup.tunnelGroups.sort((a, b) => a.tunnelName.localeCompare(b.tunnelName));
     });
-    
+
     return result;
   };
 
   // 表单验证
   const validateForm = (): boolean => {
     const newErrors: {[key: string]: string} = {};
-    
+
     if (!form.name.trim()) {
       newErrors.name = '请输入转发名称';
     } else if (form.name.length < 2 || form.name.length > 50) {
       newErrors.name = '转发名称长度应在2-50个字符之间';
     }
-    
+
     if (!form.tunnelId) {
       newErrors.tunnelId = '请选择关联隧道';
     }
-    
+
     if (!form.remoteAddr.trim()) {
       newErrors.remoteAddr = '请输入远程地址';
     } else {
@@ -411,7 +421,7 @@ export default function ForwardPage() {
       const ipv4Pattern = /^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?):\d+$/;
       const ipv6FullPattern = /^\[((([0-9a-fA-F]{1,4}:){7}([0-9a-fA-F]{1,4}|:))|(([0-9a-fA-F]{1,4}:){6}(:[0-9a-fA-F]{1,4}|((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:))|(([0-9a-fA-F]{1,4}:){5}(((:[0-9a-fA-F]{1,4}){1,2})|:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:))|(([0-9a-fA-F]{1,4}:){4}(((:[0-9a-fA-F]{1,4}){1,3})|((:[0-9a-fA-F]{1,4})?:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9a-fA-F]{1,4}:){3}(((:[0-9a-fA-F]{1,4}){1,4})|((:[0-9a-fA-F]{1,4}){0,2}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9a-fA-F]{1,4}:){2}(((:[0-9a-fA-F]{1,4}){1,5})|((:[0-9a-fA-F]{1,4}){0,3}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9a-fA-F]{1,4}:){1}(((:[0-9a-fA-F]{1,4}){1,6})|((:[0-9a-fA-F]{1,4}){0,4}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(:(((:[0-9a-fA-F]{1,4}){1,7})|((:[0-9a-fA-F]{1,4}){0,5}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:)))\]:\d+$/;
       const domainPattern = /^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*:\d+$/;
-      
+
       for (let i = 0; i < addresses.length; i++) {
         const addr = addresses[i];
         if (!ipv4Pattern.test(addr) && !ipv6FullPattern.test(addr) && !domainPattern.test(addr)) {
@@ -420,17 +430,17 @@ export default function ForwardPage() {
         }
       }
     }
-    
+
     if (form.inPort !== null && (form.inPort < 1 || form.inPort > 65535)) {
       newErrors.inPort = '端口号必须在1-65535之间';
     }
-    
+
     if (selectedTunnel && selectedTunnel.inNodePortSta && selectedTunnel.inNodePortEnd && form.inPort) {
       if (form.inPort < selectedTunnel.inNodePortSta || form.inPort > selectedTunnel.inNodePortEnd) {
         newErrors.inPort = `端口号必须在${selectedTunnel.inNodePortSta}-${selectedTunnel.inNodePortEnd}范围内`;
       }
     }
-    
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -444,7 +454,8 @@ export default function ForwardPage() {
       inPort: null,
       remoteAddr: '',
       interfaceName: '',
-      strategy: 'fifo'
+      strategy: 'fifo',
+      targetWeights: ''
     });
     setSelectedTunnel(null);
     setErrors({});
@@ -462,7 +473,8 @@ export default function ForwardPage() {
       inPort: forward.inPort,
       remoteAddr: forward.remoteAddr.split(',').join('\n'),
       interfaceName: forward.interfaceName || '',
-      strategy: forward.strategy || 'fifo'
+      strategy: forward.strategy || 'fifo',
+      targetWeights: forward.targetWeights || forward.remoteAddr.split(',').map(() => '1').join(',')
     });
     const tunnel = tunnels.find(t => t.id === forward.tunnelId);
     setSelectedTunnel(tunnel || null);
@@ -479,7 +491,7 @@ export default function ForwardPage() {
   // 确认删除转发
   const confirmDelete = async () => {
     if (!forwardToDelete) return;
-    
+
     setDeleteLoading(true);
     try {
       const res = await deleteForward(forwardToDelete.id);
@@ -519,7 +531,7 @@ export default function ForwardPage() {
   // 提交表单
   const handleSubmit = async () => {
     if (!validateForm()) return;
-    
+
     setSubmitLoading(true);
     try {
       const processedRemoteAddr = form.remoteAddr
@@ -529,7 +541,7 @@ export default function ForwardPage() {
         .join(',');
 
       const addressCount = processedRemoteAddr.split(',').length;
-      
+
       let res;
       if (isEdit) {
         // 更新时确保包含必要字段
@@ -541,7 +553,8 @@ export default function ForwardPage() {
           inPort: form.inPort,
           remoteAddr: processedRemoteAddr,
           interfaceName: form.interfaceName,
-          strategy: addressCount > 1 ? form.strategy : 'fifo'
+          strategy: addressCount > 1 ? form.strategy : 'fifo',
+          targetWeights: form.targetWeights
         };
         res = await updateForward(updateData);
       } else {
@@ -552,11 +565,12 @@ export default function ForwardPage() {
           inPort: form.inPort,
           remoteAddr: processedRemoteAddr,
           interfaceName: form.interfaceName,
-          strategy: addressCount > 1 ? form.strategy : 'fifo'
+          strategy: addressCount > 1 ? form.strategy : 'fifo',
+          targetWeights: form.targetWeights
         };
         res = await createForward(createData);
       }
-      
+
       if (res.code === 0) {
         toast.success(isEdit ? '修改成功' : '创建成功');
         setModalOpen(false);
@@ -580,11 +594,11 @@ export default function ForwardPage() {
     }
 
     const targetState = !forward.serviceRunning;
-    
+
     try {
       // 乐观更新UI
-      setForwards(prev => prev.map(f => 
-        f.id === forward.id 
+      setForwards(prev => prev.map(f =>
+        f.id === forward.id
           ? { ...f, serviceRunning: targetState }
           : f
       ));
@@ -595,19 +609,19 @@ export default function ForwardPage() {
       } else {
         res = await pauseForwardService(forward.id);
       }
-      
+
       if (res.code === 0) {
         toast.success(targetState ? '服务已启动' : '服务已暂停');
         // 更新转发状态
-        setForwards(prev => prev.map(f => 
-          f.id === forward.id 
+        setForwards(prev => prev.map(f =>
+          f.id === forward.id
             ? { ...f, status: targetState ? 1 : 0 }
             : f
         ));
       } else {
         // 操作失败，恢复UI状态
-        setForwards(prev => prev.map(f => 
-          f.id === forward.id 
+        setForwards(prev => prev.map(f =>
+          f.id === forward.id
             ? { ...f, serviceRunning: !targetState }
             : f
         ));
@@ -615,8 +629,8 @@ export default function ForwardPage() {
       }
     } catch (error) {
       // 操作失败，恢复UI状态
-      setForwards(prev => prev.map(f => 
-        f.id === forward.id 
+      setForwards(prev => prev.map(f =>
+        f.id === forward.id
           ? { ...f, serviceRunning: !targetState }
           : f
       ));
@@ -671,10 +685,51 @@ export default function ForwardPage() {
     }
   };
 
+  const handleProbeAll = async () => {
+    setProbeAllLoading(true);
+    try {
+      const response = await probeAllForwards();
+      if (response.code === 0) {
+        toast.success('拨测任务已启动，正在等待结果');
+        for (let attempt = 0; attempt < 12; attempt += 1) {
+          await new Promise(resolve => window.setTimeout(resolve, 2500));
+          await loadData(false);
+        }
+      } else {
+        toast.error(response.msg || '拨测失败');
+      }
+    } finally {
+      setProbeAllLoading(false);
+    }
+  };
+
+  const handleProbeOne = async (forward: Forward) => {
+    const response = await probeForward(forward.id);
+    if (response.code === 0) {
+      const measured = response.data as Forward | undefined;
+      if (measured) setForwards(prev => prev.map(item => item.id === forward.id ? { ...item, ...measured } : item));
+      toast.success(`${forward.name} 拨测完成`);
+      await loadData(false);
+    } else {
+      toast.error(response.msg || '拨测失败');
+    }
+  };
+
+  const getProbeDisplay = (forward: Forward) => {
+    if (forward.probeStatus === 1 && forward.latencyMs != null) {
+      const latency = Number(forward.latencyMs);
+      if (latency < 80) return { color: 'success', text: `${latency.toFixed(1)} ms` };
+      if (latency < 180) return { color: 'warning', text: `${latency.toFixed(1)} ms` };
+      return { color: 'danger', text: `${latency.toFixed(1)} ms` };
+    }
+    if (forward.probeStatus === -1) return { color: 'danger', text: '链路异常' };
+    return { color: 'default', text: '等待拨测' };
+  };
+
   // 获取连接质量
   const getQualityDisplay = (averageTime?: number, packetLoss?: number) => {
     if (averageTime === undefined || packetLoss === undefined) return null;
-    
+
     if (averageTime < 30 && packetLoss === 0) return { text: '🚀 优秀', color: 'success' };
     if (averageTime < 50 && packetLoss === 0) return { text: '✨ 很好', color: 'success' };
     if (averageTime < 100 && packetLoss < 1) return { text: '👍 良好', color: 'primary' };
@@ -695,10 +750,10 @@ export default function ForwardPage() {
   // 格式化入口地址
   const formatInAddress = (ipString: string, port: number): string => {
     if (!ipString || !port) return '';
-    
+
     const ips = ipString.split(',').map(ip => ip.trim()).filter(ip => ip);
     if (ips.length === 0) return '';
-    
+
     if (ips.length === 1) {
       const ip = ips[0];
       if (ip.includes(':') && !ip.startsWith('[')) {
@@ -707,7 +762,7 @@ export default function ForwardPage() {
         return `${ip}:${port}`;
       }
     }
-    
+
     const firstIp = ips[0];
     let formattedFirstIp;
     if (firstIp.includes(':') && !firstIp.startsWith('[')) {
@@ -715,18 +770,18 @@ export default function ForwardPage() {
     } else {
       formattedFirstIp = firstIp;
     }
-    
+
     return `${formattedFirstIp}:${port} (+${ips.length - 1})`;
   };
 
   // 格式化远程地址
   const formatRemoteAddress = (addressString: string): string => {
     if (!addressString) return '';
-    
+
     const addresses = addressString.split(',').map(addr => addr.trim()).filter(addr => addr);
     if (addresses.length === 0) return '';
     if (addresses.length === 1) return addresses[0];
-    
+
     return `${addresses[0]} (+${addresses.length - 1})`;
   };
 
@@ -740,7 +795,7 @@ export default function ForwardPage() {
   // 显示地址列表弹窗
   const showAddressModal = (addressString: string, port: number | null, title: string) => {
     if (!addressString) return;
-    
+
     let addresses: string[];
     if (port !== null) {
       // 入口地址处理
@@ -764,7 +819,7 @@ export default function ForwardPage() {
         return;
       }
     }
-    
+
     setAddressList(addresses.map((address, index) => ({
       id: index,
       address,
@@ -787,14 +842,14 @@ export default function ForwardPage() {
   // 复制地址
   const copyAddress = async (addressItem: AddressItem) => {
     try {
-      setAddressList(prev => prev.map(item => 
+      setAddressList(prev => prev.map(item =>
         item.id === addressItem.id ? { ...item, copying: true } : item
       ));
       await copyToClipboard(addressItem.address, '地址');
     } catch (error) {
       toast.error('复制失败');
     } finally {
-      setAddressList(prev => prev.map(item => 
+      setAddressList(prev => prev.map(item =>
         item.id === addressItem.id ? { ...item, copying: false } : item
       ));
     }
@@ -822,15 +877,15 @@ export default function ForwardPage() {
     }
 
     setExportLoading(true);
-    
+
     try {
       // 根据当前显示模式获取要导出的转发列表
       let forwardsToExport: Forward[] = [];
-      
+
       if (viewMode === 'grouped') {
         // 分组模式下，获取指定隧道的转发
         const userGroups = groupForwardsByUserAndTunnel();
-        forwardsToExport = userGroups.flatMap(userGroup => 
+        forwardsToExport = userGroups.flatMap(userGroup =>
           userGroup.tunnelGroups
             .filter(tunnelGroup => tunnelGroup.tunnelId === selectedTunnelForExport)
             .flatMap(tunnelGroup => tunnelGroup.forwards)
@@ -839,18 +894,18 @@ export default function ForwardPage() {
         // 直接显示模式下，过滤指定隧道的转发
         forwardsToExport = getSortedForwards().filter(forward => forward.tunnelId === selectedTunnelForExport);
       }
-      
+
       if (forwardsToExport.length === 0) {
         toast.error('所选隧道没有转发数据');
         setExportLoading(false);
         return;
       }
-      
+
       // 格式化导出数据：remoteAddr|name|inPort
       const exportLines = forwardsToExport.map(forward => {
         return `${forward.remoteAddr}|${forward.name}|${forward.inPort}`;
       });
-      
+
       const exportText = exportLines.join('\n');
       setExportData(exportText);
     } catch (error) {
@@ -891,11 +946,11 @@ export default function ForwardPage() {
 
     try {
       const lines = importData.trim().split('\n').filter(line => line.trim());
-      
+
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
         const parts = line.split('|');
-        
+
         if (parts.length < 2) {
           setImportResults(prev => [{
             line,
@@ -906,7 +961,7 @@ export default function ForwardPage() {
         }
 
         const [remoteAddr, name, inPort] = parts;
-        
+
         if (!remoteAddr.trim() || !name.trim()) {
           setImportResults(prev => [{
             line,
@@ -920,7 +975,7 @@ export default function ForwardPage() {
         const addresses = remoteAddr.trim().split(',');
         const addressPattern = /^[^:]+:\d+$/;
         const isValidFormat = addresses.every(addr => addressPattern.test(addr.trim()));
-        
+
         if (!isValidFormat) {
           setImportResults(prev => [{
             line,
@@ -952,7 +1007,8 @@ export default function ForwardPage() {
             tunnelId: selectedTunnelForImport, // 使用用户选择的隧道
             inPort: portNumber, // 使用指定端口或自动分配
             remoteAddr: remoteAddr.trim(),
-            strategy: 'fifo'
+            strategy: 'fifo',
+      targetWeights: ''
           });
 
           if (response.code === 0) {
@@ -977,10 +1033,10 @@ export default function ForwardPage() {
           }, ...prev]);
         }
       }
-      
-      
+
+
       toast.success(`导入执行完成`);
-      
+
       // 导入完成后刷新转发列表
       await loadData(false);
     } catch (error) {
@@ -1012,6 +1068,8 @@ export default function ForwardPage() {
         return { color: 'primary', text: '主备' };
       case 'round':
         return { color: 'success', text: '轮询' };
+      case 'wrr':
+        return { color: 'secondary', text: '加权轮询' };
       case 'rand':
         return { color: 'warning', text: '随机' };
       default:
@@ -1029,39 +1087,39 @@ export default function ForwardPage() {
   // 处理拖拽结束
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
-    
+
     if (!active || !over || active.id === over.id) return;
-    
+
     // 确保 forwardOrder 存在且有效
     if (!forwardOrder || forwardOrder.length === 0) return;
-    
+
     const activeId = Number(active.id);
     const overId = Number(over.id);
-    
+
     // 检查 ID 是否有效
     if (isNaN(activeId) || isNaN(overId)) return;
-    
+
     const oldIndex = forwardOrder.indexOf(activeId);
     const newIndex = forwardOrder.indexOf(overId);
-    
+
     if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
       const newOrder = arrayMove(forwardOrder, oldIndex, newIndex);
       setForwardOrder(newOrder);
-      
+
       // 保存到localStorage
       try {
         localStorage.setItem('forward-order', JSON.stringify(newOrder));
       } catch (error) {
         console.warn('无法保存排序到localStorage:', error);
       }
-      
+
       // 持久化到数据库
       try {
         const forwardsToUpdate = newOrder.map((id, index) => ({
           id,
           inx: index
         }));
-        
+
         const response = await updateForwardOrder({ forwards: forwardsToUpdate });
         if (response.code === 0) {
           // 更新本地数据中的 inx 字段
@@ -1096,7 +1154,7 @@ export default function ForwardPage() {
     if (!forwards || forwards.length === 0) {
       return [];
     }
-    
+
     // 在平铺模式下，只显示当前用户的转发
     let filteredForwards = forwards;
     if (viewMode === 'direct') {
@@ -1105,41 +1163,41 @@ export default function ForwardPage() {
         filteredForwards = forwards.filter(forward => forward.userId === currentUserId);
       }
     }
-    
+
     // 确保过滤后的转发列表有效
     if (!filteredForwards || filteredForwards.length === 0) {
       return [];
     }
-    
+
     // 优先使用数据库中的 inx 字段进行排序
     const sortedForwards = [...filteredForwards].sort((a, b) => {
       const aInx = a.inx ?? 0;
       const bInx = b.inx ?? 0;
       return aInx - bInx;
     });
-    
+
     // 如果数据库中没有排序信息，则使用本地存储的顺序
     if (forwardOrder && forwardOrder.length > 0 && sortedForwards.every(f => f.inx === undefined || f.inx === 0)) {
       const forwardMap = new Map(filteredForwards.map(f => [f.id, f]));
       const localSortedForwards: Forward[] = [];
-      
+
       forwardOrder.forEach(id => {
         const forward = forwardMap.get(id);
         if (forward) {
           localSortedForwards.push(forward);
         }
       });
-      
+
       // 添加不在排序列表中的转发（新添加的）
       filteredForwards.forEach(forward => {
         if (!forwardOrder.includes(forward.id)) {
           localSortedForwards.push(forward);
         }
       });
-      
+
       return localSortedForwards;
     }
-    
+
     return sortedForwards;
   };
 
@@ -1176,7 +1234,8 @@ export default function ForwardPage() {
   const renderForwardCard = (forward: Forward, listeners?: any) => {
     const statusDisplay = getStatusDisplay(forward.status);
     const strategyDisplay = getStrategyDisplay(forward.strategy);
-    
+    const probeDisplay = getProbeDisplay(forward);
+
     return (
       <Card key={forward.id} className="group shadow-sm border border-divider hover:shadow-md transition-shadow duration-200">
         <CardHeader className="pb-2">
@@ -1187,9 +1246,9 @@ export default function ForwardPage() {
             </div>
             <div className="flex items-center gap-1.5 ml-2">
               {viewMode === 'direct' && (
-                <div 
+                <div
                   className={`cursor-grab active:cursor-grabbing p-2 text-default-400 hover:text-default-600 transition-colors touch-manipulation ${
-                    isMobile 
+                    isMobile
                       ? 'opacity-100' // 移动端始终显示
                       : 'opacity-0 group-hover:opacity-100 sm:opacity-0 sm:group-hover:opacity-100'
                   }`}
@@ -1208,9 +1267,9 @@ export default function ForwardPage() {
                 onValueChange={() => handleServiceToggle(forward)}
                 isDisabled={forward.status !== 1 && forward.status !== 0}
               />
-              <Chip 
-                color={statusDisplay.color as any} 
-                variant="flat" 
+              <Chip
+                color={statusDisplay.color as any}
+                variant="flat"
                 size="sm"
                 className="text-xs"
               >
@@ -1219,12 +1278,12 @@ export default function ForwardPage() {
             </div>
           </div>
         </CardHeader>
-        
+
         <CardBody className="pt-0 pb-3">
           <div className="space-y-2">
             {/* 地址信息 */}
             <div className="space-y-1">
-              <div 
+              <div
                 className={`cursor-pointer px-2 py-1 bg-default-50 dark:bg-default-100/50 rounded border border-default-200 dark:border-default-300 transition-colors duration-200 ${
                   hasMultipleAddresses(forward.inIp) ? 'hover:bg-default-100 dark:hover:bg-default-200/50' : ''
                 }`}
@@ -1245,8 +1304,8 @@ export default function ForwardPage() {
                   )}
                 </div>
               </div>
-              
-              <div 
+
+              <div
                 className={`cursor-pointer px-2 py-1 bg-default-50 dark:bg-default-100/50 rounded border border-default-200 dark:border-default-300 transition-colors duration-200 ${
                   hasMultipleAddresses(forward.remoteAddr) ? 'hover:bg-default-100 dark:hover:bg-default-200/50' : ''
                 }`}
@@ -1269,6 +1328,24 @@ export default function ForwardPage() {
               </div>
             </div>
 
+            <button
+              type="button"
+              className="flex w-full items-center justify-between rounded border border-divider bg-default-50 px-2 py-1.5 text-left transition-colors hover:bg-default-100"
+              onClick={() => handleProbeOne(forward)}
+              title={`${forward.probeMessage || '每15分钟自动拨测'}${forward.probeTime ? ` · ${new Date(forward.probeTime).toLocaleString('zh-CN')}` : ''}`}
+            >
+              <div className="min-w-0">
+                <div className="text-xs text-default-500">整链路延迟</div>
+                <div className="max-w-[190px] truncate text-[11px] text-default-400">
+                  {forward.probeMessage || '每15分钟自动拨测'}
+                  {forward.probeTime ? ` · ${new Date(forward.probeTime).toLocaleTimeString('zh-CN')}` : ''}
+                </div>
+              </div>
+              <Chip color={probeDisplay.color as any} variant="flat" size="sm" className="text-xs flex-shrink-0">
+                {probeDisplay.text}
+              </Chip>
+            </button>
+
             {/* 统计信息 */}
             <div className="flex items-center justify-between pt-2 border-t border-divider">
               <Chip color={strategyDisplay.color as any} variant="flat" size="sm" className="text-xs">
@@ -1278,14 +1355,14 @@ export default function ForwardPage() {
                 <Chip variant="flat" size="sm" className="text-xs" color="primary">
                   ↑{formatFlow(forward.inFlow || 0)}
                 </Chip>
-               
+
               </div>
               <Chip variant="flat" size="sm" className="text-xs" color="success">
                   ↓{formatFlow(forward.outFlow || 0)}
                 </Chip>
             </div>
           </div>
-          
+
           <div className="flex gap-1.5 mt-3">
             <Button
               size="sm"
@@ -1338,27 +1415,39 @@ export default function ForwardPage() {
 
   if (loading) {
     return (
-      
+
         <div className="flex items-center justify-center h-64">
           <div className="flex items-center gap-3">
             <Spinner size="sm" />
             <span className="text-default-600">正在加载...</span>
           </div>
         </div>
-      
+
     );
   }
 
   const userGroups = groupForwardsByUserAndTunnel();
 
   return (
-    
+
       <div className="px-3 lg:px-6 py-8">
         {/* 页面头部 */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex-1">
           </div>
           <div className="flex items-center gap-3">
+            {localStorage.getItem('admin') === 'true' && (
+              <Button
+                size="sm"
+                variant="flat"
+                color="secondary"
+                onPress={handleProbeAll}
+                isLoading={probeAllLoading}
+                title="立即拨测全部转发；系统也会每15分钟自动拨测"
+              >
+                全部拨测
+              </Button>
+            )}
             {/* 显示模式切换按钮 */}
             <Button
               size="sm"
@@ -1379,7 +1468,7 @@ export default function ForwardPage() {
                 </svg>
               )}
             </Button>
-            
+
             {/* 导入按钮 */}
             <Button
               size="sm"
@@ -1389,7 +1478,7 @@ export default function ForwardPage() {
             >
               导入
             </Button>
-            
+
             {/* 导出按钮 */}
             <Button
               size="sm"
@@ -1397,7 +1486,7 @@ export default function ForwardPage() {
               color="success"
               onPress={handleExport}
               isLoading={exportLoading}
-          
+
             >
               导出
             </Button>
@@ -1407,12 +1496,12 @@ export default function ForwardPage() {
               variant="flat"
               color="primary"
               onPress={handleAdd}
-             
+
             >
               新增
             </Button>
-            
-        
+
+
           </div>
         </div>
 
@@ -1445,7 +1534,7 @@ export default function ForwardPage() {
                       </Chip>
                     </div>
                   </CardHeader>
-                  
+
                   <CardBody className="pt-0">
                     <Accordion variant="splitted" className="px-0">
                       {userGroup.tunnelGroups.map((tunnelGroup) => (
@@ -1544,7 +1633,7 @@ export default function ForwardPage() {
         )}
 
         {/* 新增/编辑模态框 */}
-        <Modal 
+        <Modal
           isOpen={modalOpen}
           onOpenChange={setModalOpen}
           size="2xl"
@@ -1574,7 +1663,7 @@ export default function ForwardPage() {
                       errorMessage={errors.name}
                       variant="bordered"
                     />
-                    
+
                     <Select
                       label="选择隧道"
                       placeholder="请选择关联的隧道"
@@ -1595,15 +1684,15 @@ export default function ForwardPage() {
                         </SelectItem>
                       ))}
                     </Select>
-                    
+
                     <Input
                       label="入口端口"
                       placeholder="留空自动分配"
                       type="number"
                       value={form.inPort?.toString() || ''}
-                      onChange={(e) => setForm(prev => ({ 
-                        ...prev, 
-                        inPort: e.target.value ? parseInt(e.target.value) : null 
+                      onChange={(e) => setForm(prev => ({
+                        ...prev,
+                        inPort: e.target.value ? parseInt(e.target.value) : null
                       }))}
                       isInvalid={!!errors.inPort}
                       errorMessage={errors.inPort}
@@ -1614,7 +1703,7 @@ export default function ForwardPage() {
                           : '留空将自动分配可用端口'
                       }
                     />
-                    
+
                     <Textarea
                       label="远程地址"
                       placeholder="请输入远程地址，多个地址用换行分隔&#10;例如:&#10;192.168.1.100:8080&#10;example.com:3000"
@@ -1627,7 +1716,7 @@ export default function ForwardPage() {
                       minRows={3}
                       maxRows={6}
                     />
-                    
+
                     <Input
                       label="出口网卡名或IP"
                       placeholder="请输入出口网卡名或IP"
@@ -1638,8 +1727,9 @@ export default function ForwardPage() {
                       variant="bordered"
                       description="用于多IP服务器指定使用那个IP请求远程地址，不懂的默认为空就行"
                     />
-                    
+
                     {getAddressCount(form.remoteAddr) > 1 && (
+                      <>
                       <Select
                         label="负载策略"
                         placeholder="请选择负载均衡策略"
@@ -1655,7 +1745,19 @@ export default function ForwardPage() {
                         <SelectItem key="round" >轮询模式 - 依次轮换</SelectItem>
                         <SelectItem key="rand" >随机模式 - 随机选择</SelectItem>
                         <SelectItem key="hash" >哈希模式 - IP哈希</SelectItem>
+                        <SelectItem key="wrr" >加权轮询 - 按权重平滑分配</SelectItem>
                       </Select>
+                      {form.strategy === 'wrr' && (
+                        <Input
+                          label="目标权重"
+                          value={form.targetWeights}
+                          onChange={(e) => setForm(prev => ({ ...prev, targetWeights: e.target.value }))}
+                          placeholder="例如 5,2,1"
+                          description="与远程地址顺序一致，范围 1-100，留空按 1"
+                          variant="bordered"
+                        />
+                      )}
+                      </>
                     )}
                   </div>
                 </ModalBody>
@@ -1663,8 +1765,8 @@ export default function ForwardPage() {
                   <Button variant="light" onPress={onClose}>
                     取消
                   </Button>
-                  <Button 
-                    color="primary" 
+                  <Button
+                    color="primary"
                     onPress={handleSubmit}
                     isLoading={submitLoading}
                   >
@@ -1677,7 +1779,7 @@ export default function ForwardPage() {
         </Modal>
 
         {/* 删除确认模态框 */}
-        <Modal 
+        <Modal
           isOpen={deleteModalOpen}
           onOpenChange={setDeleteModalOpen}
           size="2xl"
@@ -1703,8 +1805,8 @@ export default function ForwardPage() {
                   <Button variant="light" onPress={onClose}>
                     取消
                   </Button>
-                  <Button 
-                    color="danger" 
+                  <Button
+                    color="danger"
                     onPress={confirmDelete}
                     isLoading={deleteLoading}
                   >
@@ -1726,7 +1828,7 @@ export default function ForwardPage() {
                   复制
                 </Button>
               </div>
-              
+
               <div className="space-y-2 max-h-60 overflow-y-auto">
                 {addressList.map((item) => (
                   <div key={item.id} className="flex justify-between items-center p-3 border border-default-200 dark:border-default-100 rounded-lg">
@@ -1747,14 +1849,14 @@ export default function ForwardPage() {
         </Modal>
 
         {/* 导出数据模态框 */}
-        <Modal 
-          isOpen={exportModalOpen} 
+        <Modal
+          isOpen={exportModalOpen}
           onClose={() => {
             setExportModalOpen(false);
             setSelectedTunnelForExport(null);
             setExportData('');
-          }} 
-          
+          }}
+
           size="2xl"
         scrollBehavior="outside"
         backdrop="blur"
@@ -1793,9 +1895,9 @@ export default function ForwardPage() {
                 {/* 导出按钮和数据 */}
                 {exportData && (
                   <div className="flex justify-between items-center">
-                    <Button 
-                      color="primary" 
-                      size="sm" 
+                    <Button
+                      color="primary"
+                      size="sm"
                       onPress={executeExport}
                       isLoading={exportLoading}
                       isDisabled={!selectedTunnelForExport}
@@ -1807,9 +1909,9 @@ export default function ForwardPage() {
                     >
                       重新生成
                     </Button>
-                    <Button 
-                      color="secondary" 
-                      size="sm" 
+                    <Button
+                      color="secondary"
+                      size="sm"
                       onPress={copyExportData}
                       startContent={
                         <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
@@ -1826,9 +1928,9 @@ export default function ForwardPage() {
                 {/* 初始导出按钮 */}
                 {!exportData && (
                   <div className="text-right">
-                    <Button 
-                      color="primary" 
-                      size="sm" 
+                    <Button
+                      color="primary"
+                      size="sm"
                       onPress={executeExport}
                       isLoading={exportLoading}
                       isDisabled={!selectedTunnelForExport}
@@ -1863,8 +1965,8 @@ export default function ForwardPage() {
               </div>
             </ModalBody>
             <ModalFooter>
-              <Button 
-                variant="light" 
+              <Button
+                variant="light"
                 onPress={() => setExportModalOpen(false)}
               >
                 关闭
@@ -1874,10 +1976,10 @@ export default function ForwardPage() {
         </Modal>
 
         {/* 导入数据模态框 */}
-        <Modal 
-          isOpen={importModalOpen} 
-          onClose={() => setImportModalOpen(false)} 
-          
+        <Modal
+          isOpen={importModalOpen}
+          onClose={() => setImportModalOpen(false)}
+
           size="2xl"
         scrollBehavior="outside"
         backdrop="blur"
@@ -1931,7 +2033,7 @@ export default function ForwardPage() {
                     }}
                   />
 
-                
+
                 </div>
 
                 {/* 导入结果 */}
@@ -1941,22 +2043,22 @@ export default function ForwardPage() {
                       <h3 className="text-base font-semibold">导入结果</h3>
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-default-500">
-                          成功：{importResults.filter(r => r.success).length} / 
+                          成功：{importResults.filter(r => r.success).length} /
                           总计：{importResults.length}
                         </span>
                       </div>
                     </div>
-                    
+
                     <div className="max-h-40 overflow-y-auto space-y-1" style={{
                       scrollbarWidth: 'thin',
                       scrollbarColor: 'rgb(156 163 175) transparent'
                     }}>
                       {importResults.map((result, index) => (
-                        <div 
-                          key={index} 
+                        <div
+                          key={index}
                           className={`p-2 rounded border ${
-                            result.success 
-                              ? 'bg-success-50 dark:bg-success-100/10 border-success-200 dark:border-success-300/20' 
+                            result.success
+                              ? 'bg-success-50 dark:bg-success-100/10 border-success-200 dark:border-success-300/20'
                               : 'bg-danger-50 dark:bg-danger-100/10 border-danger-200 dark:border-danger-300/20'
                           }`}
                         >
@@ -1995,14 +2097,14 @@ export default function ForwardPage() {
               </div>
             </ModalBody>
             <ModalFooter>
-              <Button 
-                variant="light" 
+              <Button
+                variant="light"
                 onPress={() => setImportModalOpen(false)}
               >
                 关闭
               </Button>
-              <Button 
-                color="warning" 
+              <Button
+                color="warning"
                 onPress={executeImport}
                 isLoading={importLoading}
                 isDisabled={!importData.trim() || !selectedTunnelForImport}
@@ -2014,10 +2116,10 @@ export default function ForwardPage() {
         </Modal>
 
         {/* 诊断结果模态框 */}
-        <Modal 
+        <Modal
           isOpen={diagnosisModalOpen}
           onOpenChange={setDiagnosisModalOpen}
-          
+
           size="2xl"
         scrollBehavior="outside"
         backdrop="blur"
@@ -2031,9 +2133,9 @@ export default function ForwardPage() {
                   {currentDiagnosisForward && (
                     <div className="flex items-center gap-2 min-w-0">
                       <span className="text-small text-default-500 truncate flex-1 min-w-0">{currentDiagnosisForward.name}</span>
-                      <Chip 
+                      <Chip
                         color="primary"
-                        variant="flat" 
+                        variant="flat"
                         size="sm"
                         className="flex-shrink-0"
                       >
@@ -2054,7 +2156,7 @@ export default function ForwardPage() {
                     <div className="space-y-4">
                       {diagnosisResult.results.map((result, index) => {
                         const quality = getQualityDisplay(result.averageTime, result.packetLoss);
-                        
+
                         return (
                           <Card key={index} className={`shadow-sm border ${result.success ? 'border-success' : 'border-danger'}`}>
                             <CardHeader className="pb-2">
@@ -2063,9 +2165,9 @@ export default function ForwardPage() {
                                   <h3 className="text-lg font-semibold text-foreground">{result.description}</h3>
                                   <div className="flex items-center gap-2 mt-1">
                                     <span className="text-small text-default-500">节点: {result.nodeName}</span>
-                                    <Chip 
-                                      color={result.success ? 'success' : 'danger'} 
-                                      variant="flat" 
+                                    <Chip
+                                      color={result.success ? 'success' : 'danger'}
+                                      variant="flat"
                                       size="sm"
                                     >
                                       {result.success ? '连接成功' : '连接失败'}
@@ -2074,7 +2176,7 @@ export default function ForwardPage() {
                                 </div>
                               </div>
                             </CardHeader>
-                            
+
                             <CardBody className="pt-0">
                               {result.success ? (
                                 <div className="space-y-3">
@@ -2142,8 +2244,8 @@ export default function ForwardPage() {
                     关闭
                   </Button>
                   {currentDiagnosisForward && (
-                    <Button 
-                      color="primary" 
+                    <Button
+                      color="primary"
                       onPress={() => handleDiagnose(currentDiagnosisForward)}
                       isLoading={diagnosisLoading}
                     >
@@ -2156,6 +2258,6 @@ export default function ForwardPage() {
           </ModalContent>
         </Modal>
       </div>
-    
+
   );
-} 
+}

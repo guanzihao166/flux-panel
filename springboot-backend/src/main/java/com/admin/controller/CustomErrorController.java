@@ -18,12 +18,12 @@ public class CustomErrorController implements ErrorController {
     @RequestMapping("/error")
     public void handleError(HttpServletRequest request, HttpServletResponse response) throws IOException {
         Object status = request.getAttribute(RequestDispatcher.ERROR_STATUS_CODE);
-        
+
         response.setContentType("text/html; charset=UTF-8");
-        
+
         if (status != null) {
             int statusCode = Integer.valueOf(status.toString());
-            
+
             if (statusCode == HttpStatus.NOT_FOUND.value()) {
                 response.setStatus(HttpStatus.NOT_FOUND.value());
                 String html = generateErrorHtml(
@@ -33,9 +33,9 @@ public class CustomErrorController implements ErrorController {
                 );
                 response.getWriter().write(html);
             }
-        } 
+        }
     }
-    
+
     private String generateErrorHtml(String statusCode, String title, String path) {
         return "<!DOCTYPE html>" +
                 "<html lang='zh-CN'>" +
@@ -75,4 +75,4 @@ public class CustomErrorController implements ErrorController {
                 "</body>" +
                 "</html>";
     }
-} 
+}

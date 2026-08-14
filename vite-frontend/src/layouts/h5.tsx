@@ -3,6 +3,8 @@ import { useNavigate, useLocation } from 'react-router-dom';
 
 import { Logo } from '@/components/icons';
 import { siteConfig } from '@/config/site';
+import { ThemeSwitcher } from '@/components/theme-switcher';
+import AnnouncementPopup from '@/components/announcement-popup';
 
 interface TabItem {
   path: string;
@@ -83,7 +85,7 @@ export default function H5Layout({
       // 补充设置admin字段，避免下次再次判断
       localStorage.setItem('admin', adminFlag.toString());
     }
-    
+
 
     setIsAdmin(adminFlag);
   }, []);
@@ -94,7 +96,7 @@ export default function H5Layout({
   };
 
   // 过滤tab项（根据权限）
-  const filteredTabItems = tabItems.filter(item => 
+  const filteredTabItems = tabItems.filter(item =>
     !item.adminOnly || isAdmin
   );
 
@@ -119,6 +121,7 @@ export default function H5Layout({
         </div>
 
         <div className="flex items-center gap-2">
+          <ThemeSwitcher compact />
         </div>
       </header>
 
@@ -141,8 +144,8 @@ export default function H5Layout({
               className={`
                 flex flex-col items-center justify-center flex-1 h-full
                 transition-colors duration-200 min-h-[44px]
-                ${isActive 
-                  ? 'text-primary-600 dark:text-primary-400' 
+                ${isActive
+                  ? 'text-primary-600 dark:text-primary-400'
                   : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
                 }
               `}
@@ -156,6 +159,8 @@ export default function H5Layout({
         })}
       </nav>
 
+      {/* 全局公告弹窗（仅普通用户） */}
+      <AnnouncementPopup />
     </div>
   );
 }

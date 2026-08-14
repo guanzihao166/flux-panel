@@ -32,4 +32,4 @@ public class UserUpdateDto {
     private Long flowResetTime;
 
     private Integer status;
-} 
+}

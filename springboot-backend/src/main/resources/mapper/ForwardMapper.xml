@@ -4,7 +4,7 @@
 
     <!-- 查询所有转发信息（包含隧道信息） -->
     <select id="selectAllForwardsWithTunnel" resultType="com.admin.common.dto.ForwardWithTunnelDto">
-        SELECT 
+        SELECT
             f.id,
             f.user_id AS userId,
             f.name,
@@ -21,22 +21,30 @@
             f.out_flow AS outFlow,
             f.inx AS inx,
             f.interface_name AS interfaceName,
+            f.latency_ms AS latencyMs,
+            f.probe_status AS probeStatus,
+            f.probe_time AS probeTime,
+            f.probe_message AS probeMessage,
+            f.target_weights AS targetWeights,
+            t.out_node_ids AS outNodeIds,
+            t.chain_node_ids AS chainNodeIds,
+            t.balance_strategy AS balanceStrategy,
             t.name AS tunnelName,
             t.in_ip AS inIp,
             t.out_ip AS outIp,
             t.type,
             t.protocol
-        FROM 
+        FROM
             forward f
-        LEFT JOIN 
+        LEFT JOIN
             tunnel t ON f.tunnel_id = t.id
-        ORDER BY 
+        ORDER BY
             f.created_time DESC
     </select>
 
     <!-- 根据用户ID查询转发信息（包含隧道信息） -->
     <select id="selectForwardsWithTunnelByUserId" resultType="com.admin.common.dto.ForwardWithTunnelDto">
-        SELECT 
+        SELECT
             f.id,
             f.user_id AS userId,
             f.name,
@@ -53,18 +61,26 @@
             f.strategy AS strategy,
             f.inx AS inx,
             f.interface_name AS interfaceName,
+            f.latency_ms AS latencyMs,
+            f.probe_status AS probeStatus,
+            f.probe_time AS probeTime,
+            f.probe_message AS probeMessage,
+            f.target_weights AS targetWeights,
+            t.out_node_ids AS outNodeIds,
+            t.chain_node_ids AS chainNodeIds,
+            t.balance_strategy AS balanceStrategy,
             t.name AS tunnelName,
             t.in_ip AS inIp,
             t.out_ip AS outIp,
             t.type,
             t.protocol
-        FROM 
+        FROM
             forward f
-        LEFT JOIN 
+        LEFT JOIN
             tunnel t ON f.tunnel_id = t.id
-        WHERE 
+        WHERE
             f.user_id = #{userId}
-        ORDER BY 
+        ORDER BY
             f.created_time DESC
     </select>
 

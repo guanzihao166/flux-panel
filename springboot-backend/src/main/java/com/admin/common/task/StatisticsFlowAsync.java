@@ -57,27 +57,27 @@ public class StatisticsFlowAsync {
             // 从数据库获取上一次记录
             StatisticsFlow lastFlowRecord = statisticsFlowService.getOne(
                     new LambdaQueryWrapper<StatisticsFlow>()
-                            .eq(StatisticsFlow::getUserId, user.getId()) 
-                            .orderByDesc(StatisticsFlow::getId)         
-                            .last("LIMIT 1")                     
+                            .eq(StatisticsFlow::getUserId, user.getId())
+                            .orderByDesc(StatisticsFlow::getId)
+                            .last("LIMIT 1")
             );
 
             long currentTotalFlow = currentFlow;
             long incrementFlow = currentTotalFlow;
-            
+
             if (lastFlowRecord != null) {
                 long lastTotalFlow = lastFlowRecord.getTotalFlow();
                 incrementFlow = currentTotalFlow - lastTotalFlow;
-                
+
                 if (incrementFlow < 0) {
-                    incrementFlow = currentTotalFlow; 
+                    incrementFlow = currentTotalFlow;
                 }
             }
 
             StatisticsFlow statisticsFlow = new StatisticsFlow();
             statisticsFlow.setUserId(user.getId());
-            statisticsFlow.setFlow(incrementFlow);        
-            statisticsFlow.setTotalFlow(currentTotalFlow); 
+            statisticsFlow.setFlow(incrementFlow);
+            statisticsFlow.setTotalFlow(currentTotalFlow);
             statisticsFlow.setTime(hourString);
             statisticsFlow.setCreatedTime(time);
 

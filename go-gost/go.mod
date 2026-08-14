@@ -147,4 +147,3 @@ require (
 )
 
 replace github.com/go-gost/x => ./x
-

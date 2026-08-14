@@ -1,5 +1,61 @@
 @import "tailwindcss";
 
+:root {
+  --app-bg: #f3f4f6;
+  --app-surface: #ffffff;
+  --app-border: #e5e7eb;
+}
+
+html.dark {
+  color-scheme: dark;
+  --app-bg: #24272b;
+  --app-surface: #2d3136;
+  --app-surface-muted: #353a40;
+  --app-border: #484e55;
+  --app-text: #d8dce1;
+  --app-text-muted: #aeb4bc;
+}
+
+html.dark body,
+html.dark .bg-background {
+  background-color: var(--app-bg) !important;
+  color: var(--app-text);
+}
+
+html.dark .bg-content1,
+html.dark .bg-content2,
+html.dark .bg-default-50,
+html.dark .bg-default-100 {
+  background-color: var(--app-surface) !important;
+}
+
+html.dark .border-default-100,
+html.dark .border-default-200,
+html.dark .border-gray-200 {
+  border-color: var(--app-border) !important;
+}
+
+html.dark .text-default-400,
+html.dark .text-default-500,
+html.dark .text-default-600 {
+  color: var(--app-text-muted) !important;
+}
+
+html.dark [class*="bg-blue-"],
+html.dark [class*="bg-green-"],
+html.dark [class*="bg-purple-"],
+html.dark [class*="bg-orange-"] {
+  filter: saturate(.68) brightness(.92);
+}
+
+html {
+  background: var(--app-bg);
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+body {
+  background: var(--app-bg);
+}
 
 /* 移动端视口高度优化 */
 html, body {
@@ -22,7 +78,7 @@ html, body {
   .h-screen {
     height: -webkit-fill-available;
   }
-  
+
   .min-h-screen {
     min-height: -webkit-fill-available;
   }
@@ -33,7 +89,7 @@ html, body {
   * {
     -webkit-overflow-scrolling: touch;
   }
-  
+
   body {
     overscroll-behavior-y: none;
   }

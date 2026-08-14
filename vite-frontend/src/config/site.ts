@@ -85,7 +85,7 @@ export const getCachedConfig = async (key: string): Promise<string | null> => {
 // 获取所有配置（优先从缓存）
 export const getCachedConfigs = async (): Promise<Record<string, string>> => {
   // 尝试从缓存获取所有配置
-  const configKeys = ['app_name'];
+  const configKeys = ['app_name', 'captcha_enabled', 'captcha_type', 'ip', 'turnstile_enabled', 'turnstile_site_key'];
   const cachedConfigs: Record<string, string> = {};
   let hasCachedData = false;
 

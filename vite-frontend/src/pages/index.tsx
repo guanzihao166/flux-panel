@@ -9,7 +9,7 @@ import { isWebViewFunc } from '@/utils/panel';
 import { siteConfig } from '@/config/site';
 import { title } from "@/components/primitives";
 import DefaultLayout from "@/layouts/default";
-import { login, LoginData, checkCaptcha } from "@/api";
+import { login, LoginData, checkCaptcha, getLoginSecurityConfig } from "@/api";
 import "@/utils/tac.css";
 import "@/utils/tac.min.js";
 import bgImage from "@/images/bg.jpg";
@@ -50,9 +50,15 @@ export default function IndexPage() {
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Partial<LoginForm>>({});
   const [showCaptcha, setShowCaptcha] = useState(false);
+  const [turnstileEnabled, setTurnstileEnabled] = useState(false);
+  const [turnstileSiteKey, setTurnstileSiteKey] = useState('');
+  const [turnstileToken, setTurnstileToken] = useState('');
+  const [turnstileReady, setTurnstileReady] = useState(false);
   const navigate = useNavigate();
   const tacInstanceRef = useRef<any>(null);
   const captchaContainerRef = useRef<HTMLDivElement>(null);
+  const turnstileContainerRef = useRef<HTMLDivElement>(null);
+  const turnstileWidgetRef = useRef<string | null>(null);
   const [isWebView, setIsWebView] = useState(false);
   // 清理验证码实例
   useEffect(() => {
@@ -63,10 +69,61 @@ export default function IndexPage() {
       }
     };
   }, []);
-  // 检测是否在WebView中运行
+  // 检测是否在WebView中运行并加载登录安全配置
   useEffect(() => {
     setIsWebView(isWebViewFunc());
+    getLoginSecurityConfig().then((response) => {
+      if (response.code === 0 && response.data?.effectiveEnabled && response.data.siteKey) {
+        setTurnstileEnabled(true);
+        setTurnstileSiteKey(response.data.siteKey);
+      }
+    }).catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    if (!turnstileEnabled || !turnstileSiteKey) return;
+    const renderWidget = () => {
+      if (!window.turnstile || !turnstileContainerRef.current || turnstileWidgetRef.current) return;
+      turnstileWidgetRef.current = window.turnstile.render(turnstileContainerRef.current, {
+        sitekey: turnstileSiteKey,
+        theme: document.documentElement.classList.contains('dark') ? 'dark' : 'light',
+        callback: (token) => {
+          setTurnstileToken(token);
+          setTurnstileReady(true);
+        },
+        'expired-callback': () => {
+          setTurnstileToken('');
+          setTurnstileReady(false);
+        },
+        'error-callback': () => {
+          setTurnstileToken('');
+          setTurnstileReady(false);
+        },
+      });
+    };
+
+    const existing = document.querySelector<HTMLScriptElement>('script[data-turnstile-script]');
+    if (existing) {
+      if (window.turnstile) renderWidget();
+      else existing.addEventListener('load', renderWidget, { once: true });
+    } else {
+      const script = document.createElement('script');
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+      script.async = true;
+      script.defer = true;
+      script.dataset.turnstileScript = 'true';
+      script.addEventListener('load', renderWidget, { once: true });
+      document.head.appendChild(script);
+    }
+
+    return () => {
+      if (turnstileWidgetRef.current && window.turnstile) {
+        window.turnstile.remove(turnstileWidgetRef.current);
+        turnstileWidgetRef.current = null;
+      }
+    };
+  }, [turnstileEnabled, turnstileSiteKey]);
+
   // 验证表单
   const validateForm = (): boolean => {
     const newErrors: Partial<LoginForm> = {};
@@ -110,13 +167,13 @@ export default function IndexPage() {
 
       // 使用axios的baseURL，确保在WebView中使用正确的面板地址
       const baseURL = axios.defaults.baseURL || (import.meta.env.VITE_API_BASE ? `${import.meta.env.VITE_API_BASE}/api/v1/` : '/api/v1/');
-      
+
       const config: CaptchaConfig = {
         requestCaptchaDataUrl: `${baseURL}captcha/generate`,
-        validCaptchaUrl: `${baseURL}captcha/verify`, 
+        validCaptchaUrl: `${baseURL}captcha/verify`,
         bindEl: "#captcha-container",
         validSuccess: (res: any, _: any, tac: any) => {
-          
+
 
           form.captchaId = res.data.validToken
 
@@ -138,13 +195,13 @@ export default function IndexPage() {
       };
 
       // 检测暗黑模式
-      const isDarkMode = document.documentElement.classList.contains('dark') || 
+      const isDarkMode = document.documentElement.classList.contains('dark') ||
                         document.documentElement.getAttribute('data-theme') === 'dark' ||
                         window.matchMedia('(prefers-color-scheme: dark)').matches;
-      
+
       // 根据主题调整颜色
       const trackColor = isDarkMode ? "#4a5568" : "#7db0be"; // 暗黑模式使用更深的灰蓝色
-      
+
       const style: CaptchaStyle = {
         bgUrl: bgImage,
         logoUrl: null,
@@ -172,10 +229,11 @@ export default function IndexPage() {
         username: form.username.trim(),
         password: form.password,
         captchaId: form.captchaId,
+        turnstileToken,
       };
 
       const response = await login(loginData);
-      
+
       if (response.code !== 0) {
         toast.error(response.msg || "登录失败");
         return;
@@ -206,19 +264,28 @@ export default function IndexPage() {
       console.error('登录错误:', error);
       toast.error("网络错误，请稍后重试");
     } finally {
+      if (turnstileEnabled && window.turnstile && turnstileWidgetRef.current) {
+        window.turnstile.reset(turnstileWidgetRef.current);
+        setTurnstileToken('');
+        setTurnstileReady(false);
+      }
       setLoading(false);
     }
   };
 
   const handleLogin = async () => {
     if (!validateForm()) return;
+    if (turnstileEnabled && !turnstileToken) {
+      toast.error('请先完成人机验证');
+      return;
+    }
 
     setLoading(true);
 
     try {
       // 先检查是否需要验证码
       const checkResponse = await checkCaptcha();
-      
+
       if (checkResponse.code !== 0) {
         toast.error("检查验证码状态失败，请重试" + checkResponse.msg);
         setLoading(false);
@@ -273,7 +340,7 @@ export default function IndexPage() {
                   isInvalid={!!errors.username}
                   errorMessage={errors.username}
                 />
-                
+
                 <Input
                   label="密码"
                   placeholder="请输入密码"
@@ -286,7 +353,14 @@ export default function IndexPage() {
                   isInvalid={!!errors.password}
                 />
 
-                
+
+                {turnstileEnabled && (
+                  <div className="space-y-2">
+                    <div ref={turnstileContainerRef} className="flex min-h-[65px] justify-center" />
+                    {!turnstileReady && <p className="text-center text-xs text-default-500">请完成人机验证后登录</p>}
+                  </div>
+                )}
+
                 <Button
                   color="primary"
                   size="lg"
@@ -304,13 +378,13 @@ export default function IndexPage() {
 
 
       {/* 版权信息 - 固定在底部，不占据布局空间 */}
-      
+
                <div className="fixed inset-x-0 bottom-4 text-center py-4">
                <p className="text-xs text-gray-400 dark:text-gray-500">
                  Powered by{' '}
-                 <a 
-                   href="https://github.com/bqlpfy/flux-panel" 
-                   target="_blank" 
+                 <a
+                   href="https://github.com/bqlpfy/flux-panel"
+                   target="_blank"
                    rel="noopener noreferrer"
                    className="text-gray-500 dark:text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
                  >
@@ -321,8 +395,8 @@ export default function IndexPage() {
                  v{ isWebView ? siteConfig.app_version : siteConfig.version}
                </p>
              </div>
-      
-   
+
+
 
         {/* 验证码弹层 */}
         {showCaptcha && (
@@ -331,14 +405,14 @@ export default function IndexPage() {
             <div className="absolute inset-0 bg-black/60 dark:bg-black/80 backdrop-blur-sm captcha-backdrop-enter" />
            {/* 验证码容器 */}
            <div className="mb-4">
-                <div 
-                  id="captcha-container" 
+                <div
+                  id="captcha-container"
                   ref={captchaContainerRef}
                   className="w-full flex justify-center"
                   style={{
-                    filter: document.documentElement.classList.contains('dark') || 
+                    filter: document.documentElement.classList.contains('dark') ||
                            document.documentElement.getAttribute('data-theme') === 'dark' ||
-                           window.matchMedia('(prefers-color-scheme: dark)').matches 
+                           window.matchMedia('(prefers-color-scheme: dark)').matches
                            ? 'brightness(0.8) contrast(0.9)' : 'none'
                   }}
                 />

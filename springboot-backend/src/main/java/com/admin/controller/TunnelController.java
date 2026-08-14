@@ -32,7 +32,7 @@ public class TunnelController extends BaseController {
 
     @Autowired
     private TunnelService tunnelService;
-    
+
     @Autowired
     private UserTunnelService userTunnelService;
 
@@ -66,7 +66,7 @@ public class TunnelController extends BaseController {
     }
 
     // ============ 用户隧道权限管理相关方法 ============
-    
+
     /**
      * 分配用户隧道权限
      * @param userTunnelDto 用户隧道权限数据
@@ -78,7 +78,7 @@ public class TunnelController extends BaseController {
     public R assignUserTunnel(@Validated @RequestBody UserTunnelDto userTunnelDto) {
         return userTunnelService.assignUserTunnel(userTunnelDto);
     }
-    
+
     /**
      * 查询用户隧道权限列表
      * @param queryDto 查询条件
@@ -90,7 +90,7 @@ public class TunnelController extends BaseController {
     public R getUserTunnelList(@RequestBody @Validated UserTunnelQueryDto queryDto) {
         return userTunnelService.getUserTunnelList(queryDto);
     }
-    
+
     /**
      * 删除用户隧道权限
      * @param params 包含userId和tunnelId的参数
@@ -104,7 +104,7 @@ public class TunnelController extends BaseController {
         return userTunnelService.removeUserTunnel(id);
     }
 
-    
+
     /**
      * 更新用户隧道权限（包含流量、流量重置时间、到期时间）
      * @param updateDto 更新数据

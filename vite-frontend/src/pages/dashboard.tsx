@@ -6,14 +6,14 @@ import toast from 'react-hot-toast';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 
-import { getUserPackageInfo } from "@/api";
+import { getUserPackageInfo, getAnnouncementHistory, normalizeAnnouncementList, type Announcement } from "@/api";
 
 interface UserInfo {
   flow: number;
   inFlow: number;
   outFlow: number;
   num: number;
-  expTime?: string;
+  expTime?: string | number;
   flowResetTime?: number;
 }
 
@@ -25,7 +25,7 @@ interface UserTunnel {
   inFlow: number;
   outFlow: number;
   num: number;
-  expTime?: string;
+  expTime?: string | number;
   flowResetTime?: number;
   tunnelFlow: number;
 }
@@ -64,7 +64,8 @@ export default function DashboardPage() {
   const [forwardList, setForwardList] = useState<Forward[]>([]);
   const [statisticsFlows, setStatisticsFlows] = useState<StatisticsFlow[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
-  
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+
   const [addressModalOpen, setAddressModalOpen] = useState(false);
   const [addressModalTitle, setAddressModalTitle] = useState('');
   const [addressList, setAddressList] = useState<AddressItem[]>([]);
@@ -74,32 +75,32 @@ export default function DashboardPage() {
     // 避免重复通知，检查是否已经显示过
     const notificationKey = `expiration-${userInfo.expTime}-${tunnels.map(t => t.expTime).join(',')}`;
     const lastNotified = localStorage.getItem('lastNotified');
-    
+
     if (lastNotified === notificationKey) {
       return; // 已经通知过，不重复显示
     }
-    
+
     let hasNotification = false;
-    
+
     // 检查主账户有效期
     if (userInfo.expTime) {
       const expDate = new Date(userInfo.expTime);
       const now = new Date();
-      
+
       if (!isNaN(expDate.getTime()) && expDate > now) {
         const diffTime = expDate.getTime() - now.getTime();
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        
+
         if (diffDays <= 7 && diffDays > 0) {
           hasNotification = true;
           if (diffDays === 1) {
-            toast('账户将于明天过期，请及时续费', { 
+            toast('账户将于明天过期，请及时续费', {
               icon: '⚠️',
               duration: 6000,
               style: { background: '#f59e0b', color: '#fff' }
             });
           } else {
-            toast(`账户将于${diffDays}天后过期，请及时续费`, { 
+            toast(`账户将于${diffDays}天后过期，请及时续费`, {
               icon: '⚠️',
               duration: 6000,
               style: { background: '#f59e0b', color: '#fff' }
@@ -107,7 +108,7 @@ export default function DashboardPage() {
           }
         } else if (diffDays <= 0) {
           hasNotification = true;
-          toast('账户已过期，请立即续费', { 
+          toast('账户已过期，请立即续费', {
             icon: '⚠️',
             duration: 8000,
             style: { background: '#ef4444', color: '#fff' }
@@ -115,27 +116,27 @@ export default function DashboardPage() {
         }
       }
     }
-    
+
     // 检查隧道有效期
     tunnels.forEach(tunnel => {
       if (tunnel.expTime) {
         const expDate = new Date(tunnel.expTime);
         const now = new Date();
-        
+
         if (!isNaN(expDate.getTime()) && expDate > now) {
           const diffTime = expDate.getTime() - now.getTime();
           const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-          
+
           if (diffDays <= 7 && diffDays > 0) {
             hasNotification = true;
             if (diffDays === 1) {
-              toast(`隧道"${tunnel.tunnelName}"将于明天过期`, { 
+              toast(`隧道"${tunnel.tunnelName}"将于明天过期`, {
                 icon: '⚠️',
                 duration: 5000,
                 style: { background: '#f59e0b', color: '#fff' }
               });
             } else {
-              toast(`隧道"${tunnel.tunnelName}"将于${diffDays}天后过期`, { 
+              toast(`隧道"${tunnel.tunnelName}"将于${diffDays}天后过期`, {
                 icon: '⚠️',
                 duration: 5000,
                 style: { background: '#f59e0b', color: '#fff' }
@@ -143,7 +144,7 @@ export default function DashboardPage() {
             }
           } else if (diffDays <= 0) {
             hasNotification = true;
-            toast(`隧道"${tunnel.tunnelName}"已过期`, { 
+            toast(`隧道"${tunnel.tunnelName}"已过期`, {
               icon: '⚠️',
               duration: 6000,
               style: { background: '#ef4444', color: '#fff' }
@@ -152,7 +153,7 @@ export default function DashboardPage() {
         }
       }
     });
-    
+
     // 如果显示了通知，记录防止重复
     if (hasNotification) {
       localStorage.setItem('lastNotified', notificationKey);
@@ -166,12 +167,13 @@ export default function DashboardPage() {
     setUserTunnels([]);
     setForwardList([]);
     setStatisticsFlows([]);
-    
+
     // 检查用户是否是管理员
     const adminStatus = localStorage.getItem('admin');
     setIsAdmin(adminStatus === 'true');
-    
+
     loadPackageData();
+    loadAnnouncements();
     localStorage.setItem('e', '/dashboard');
   }, []);
 
@@ -185,7 +187,7 @@ export default function DashboardPage() {
         setUserTunnels(data.tunnelPermissions || []);
         setForwardList(data.forwards || []);
         setStatisticsFlows(data.statisticsFlows || []);
-        
+
         // 检查有效期并显示通知
         checkExpirationNotifications(data.userInfo, data.tunnelPermissions || []);
       } else {
@@ -199,12 +201,32 @@ export default function DashboardPage() {
     }
   };
 
+  // 加载历史公告（按发布时间倒序展示）
+  const loadAnnouncements = async () => {
+    try {
+      const res = await getAnnouncementHistory();
+      if (res.code === 0) {
+        const list = normalizeAnnouncementList(res.data).filter((a) => a && a.id != null);
+        // 按发布时间倒序（无发布时间时退回创建时间）
+        list.sort((a, b) => {
+          const ta = new Date(a.publishedTime || a.createdTime || 0).getTime();
+          const tb = new Date(b.publishedTime || b.createdTime || 0).getTime();
+          return tb - ta;
+        });
+        setAnnouncements(list);
+      }
+    } catch (error) {
+      // 公告加载失败不影响页面主体功能
+      console.warn('获取历史公告失败:', error);
+    }
+  };
+
   const formatFlow = (value: number, unit: string = 'bytes'): string => {
     // 99999 表示无限制
     if (value === 99999) {
       return '无限制';
     }
-    
+
     if (unit === 'gb') {
       return value + ' GB';
     } else {
@@ -251,29 +273,39 @@ export default function DashboardPage() {
   };
 
 
-  const getExpStatus = (expTime?: string) => {
-    if (!expTime) return { 
-      color: 'text-green-600 dark:text-green-400', 
+  const formatExpirationDate = (expTime?: string | number) => {
+    if (!expTime) return '永久有效';
+    const expDate = new Date(expTime);
+    if (Number.isNaN(expDate.getTime())) return '时间无效';
+    return expDate.toLocaleString('zh-CN', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    });
+  };
+
+  const getExpStatus = (expTime?: string | number) => {
+    if (!expTime) return {
+      color: 'text-green-600 dark:text-green-400',
       bg: 'bg-green-50 dark:bg-green-500/10 border-green-200 dark:border-green-500/20',
-      text: '永久' 
+      text: '永久'
     };
 
     const now = new Date();
     const expDate = new Date(expTime);
 
     if (isNaN(expDate.getTime())) {
-      return { 
-        color: 'text-gray-600 dark:text-gray-400', 
+      return {
+        color: 'text-gray-600 dark:text-gray-400',
         bg: 'bg-gray-50 dark:bg-black/10 border-gray-200 dark:border-gray-500/20',
-        text: '无效' 
+        text: '无效'
       };
     }
 
     if (expDate < now) {
-      return { 
-        color: 'text-red-600 dark:text-red-400', 
+      return {
+        color: 'text-red-600 dark:text-red-400',
         bg: 'bg-red-50 dark:bg-red-500/10 border-red-200 dark:border-red-500/20',
-        text: '已过期' 
+        text: '已过期'
       };
     }
 
@@ -281,22 +313,22 @@ export default function DashboardPage() {
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
     if (diffDays <= 7) {
-      return { 
-        color: 'text-red-600 dark:text-red-400', 
+      return {
+        color: 'text-red-600 dark:text-red-400',
         bg: 'bg-red-50 dark:bg-red-500/10 border-red-200 dark:border-red-500/20',
-        text: `${diffDays}天后过期` 
+        text: `${diffDays}天后过期`
       };
     } else if (diffDays <= 30) {
-      return { 
-        color: 'text-orange-600 dark:text-orange-400', 
+      return {
+        color: 'text-orange-600 dark:text-orange-400',
         bg: 'bg-orange-50 dark:bg-orange-500/10 border-orange-200 dark:border-orange-500/20',
-        text: `${diffDays}天后过期` 
+        text: `${diffDays}天后过期`
       };
     } else {
-      return { 
-        color: 'text-green-600 dark:text-green-400', 
+      return {
+        color: 'text-green-600 dark:text-green-400',
         bg: 'bg-green-50 dark:bg-green-500/10 border-green-200 dark:border-green-500/20',
-        text: `${diffDays}天后过期` 
+        text: `${diffDays}天后过期`
       };
     }
   };
@@ -331,7 +363,7 @@ export default function DashboardPage() {
 
   const renderProgressBar = (percentage: number, size: 'sm' | 'md' = 'md', isUnlimited: boolean = false) => {
     const height = size === 'sm' ? 'h-1.5' : 'h-2';
-    
+
     if (isUnlimited) {
       return (
         <div className="w-full">
@@ -341,11 +373,11 @@ export default function DashboardPage() {
         </div>
       );
     }
-    
+
     return (
       <div className="w-full">
         <div className={`w-full bg-gray-200 dark:bg-gray-800 rounded-full ${height}`}>
-          <div 
+          <div
             className={`${height} rounded-full transition-all duration-300 ${getUsageColor(percentage)}`}
             style={{ width: `${Math.min(percentage, 100)}%` }}
           ></div>
@@ -385,10 +417,10 @@ export default function DashboardPage() {
   const formatResetTime = (resetDay?: number): string => {
     if (resetDay === undefined || resetDay === null) return '';
     if (resetDay === 0) return '不重置';
-    
+
     const now = new Date();
     const currentDay = now.getDate();
-    
+
     let daysUntilReset;
     if (resetDay > currentDay) {
       daysUntilReset = resetDay - currentDay;
@@ -399,7 +431,7 @@ export default function DashboardPage() {
     } else {
       daysUntilReset = 0;
     }
-    
+
     if (daysUntilReset === 0) {
       return '今日重置';
     } else if (daysUntilReset === 1) {
@@ -426,11 +458,11 @@ export default function DashboardPage() {
 
   const formatInAddress = (ipString: string, port: number): string => {
     if (!ipString || !port) return '';
-    
+
     const ips = ipString.split(',').map(ip => ip.trim()).filter(ip => ip);
-    
+
     if (ips.length === 0) return '';
-    
+
     if (ips.length === 1) {
       const ip = ips[0];
       if (ip.includes(':') && !ip.startsWith('[')) {
@@ -439,30 +471,30 @@ export default function DashboardPage() {
         return `${ip}:${port}`;
       }
     }
-    
+
     const firstIp = ips[0];
     let formattedFirstIp;
-    
+
     if (firstIp.includes(':') && !firstIp.startsWith('[')) {
       formattedFirstIp = `[${firstIp}]`;
     } else {
       formattedFirstIp = firstIp;
     }
-    
+
     return `${formattedFirstIp}:${port} (+${ips.length - 1})`;
   };
 
   const formatRemoteAddress = (remoteAddr: string): string => {
     if (!remoteAddr) return '';
-    
+
     const addresses = remoteAddr.split(',').map(addr => addr.trim()).filter(addr => addr);
-    
+
     if (addresses.length === 0) return '';
-    
+
     if (addresses.length === 1) {
       return addresses[0];
     }
-    
+
     return `${addresses[0]} (+${addresses.length - 1})`;
   };
 
@@ -480,14 +512,14 @@ export default function DashboardPage() {
 
   const showAddressModal = (ipString: string, port: number, title: string) => {
     if (!ipString || !port) return;
-    
+
     const ips = ipString.split(',').map(ip => ip.trim()).filter(ip => ip);
-    
+
     if (ips.length <= 1) {
               copyToClipboard(formatInAddress(ipString, port));
       return;
     }
-    
+
     const formattedList = ips.map((ip, index) => {
       let formattedAddress;
       if (ip.includes(':') && !ip.startsWith('[')) {
@@ -502,7 +534,7 @@ export default function DashboardPage() {
         copying: false
       };
     });
-    
+
     setAddressList(formattedList);
     setAddressModalTitle(`${title} (${ips.length}个)`);
     setAddressModalOpen(true);
@@ -510,14 +542,14 @@ export default function DashboardPage() {
 
   const showRemoteAddressModal = (remoteAddr: string, title: string) => {
     if (!remoteAddr) return;
-    
+
     const addresses = remoteAddr.split(',').map(addr => addr.trim()).filter(addr => addr);
-    
+
     if (addresses.length <= 1) {
               copyToClipboard(remoteAddr);
       return;
     }
-    
+
     const formattedList = addresses.map((address, index) => {
       return {
         id: index,
@@ -526,7 +558,7 @@ export default function DashboardPage() {
         copying: false
       };
     });
-    
+
     setAddressList(formattedList);
     setAddressModalTitle(`${title} (${addresses.length}个)`);
     setAddressModalOpen(true);
@@ -543,14 +575,14 @@ export default function DashboardPage() {
 
   const copyAddress = async (addressItem: AddressItem) => {
     try {
-      setAddressList(prev => prev.map(item => 
+      setAddressList(prev => prev.map(item =>
         item.id === addressItem.id ? { ...item, copying: true } : item
       ));
       await copyToClipboard(addressItem.address);
     } catch (error) {
       toast.error('复制失败');
     } finally {
-      setAddressList(prev => prev.map(item => 
+      setAddressList(prev => prev.map(item =>
         item.id === addressItem.id ? { ...item, copying: false } : item
       ));
     }
@@ -564,17 +596,17 @@ export default function DashboardPage() {
 
   const calculateForwardBillingFlow = (forward: Forward): number => {
     if (!forward) return 0;
-    
+
     const inFlow = forward.inFlow || 0;
     const outFlow = forward.outFlow || 0;
-    
+
     // 后端已按计费类型处理流量，前端直接使用入站+出站总和
     return inFlow + outFlow;
   };
 
       if (loading) {
       return (
-        
+
           <div className="px-3 lg:px-6 flex-grow pt-2 lg:pt-4">
             <div className="flex items-center justify-center h-64">
               <div className="flex items-center gap-3">
@@ -583,12 +615,12 @@ export default function DashboardPage() {
               </div>
             </div>
           </div>
-        
+
       );
     }
 
       return (
-      
+
         <div className="px-3 lg:px-6 py-2 lg:py-4">
 
                           {/* 响应式统计卡片 */}
@@ -597,14 +629,28 @@ export default function DashboardPage() {
              <CardBody className="p-3 lg:p-4">
                <div className="flex flex-col space-y-2">
                  <div className="flex items-center justify-between">
-                   <p className="text-xs lg:text-sm text-default-600 truncate">总流量</p>
+                   <p className="text-xs lg:text-sm text-default-600 truncate">流量使用</p>
                    <div className="p-1.5 lg:p-2 bg-blue-100 dark:bg-blue-500/20 rounded-lg flex-shrink-0">
                      <svg className="w-4 h-4 lg:w-5 lg:h-5 text-blue-600 dark:text-blue-400" fill="currentColor" viewBox="0 0 20 20">
-                       <path d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 001-1v-6a1 1 0 00-1-1h-2z" />
+                       <path d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6zM14 9a1 1 0 00-1 1v6a1 1 0 001 1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6a1 1 0 011-1z" />
                      </svg>
                    </div>
                  </div>
-                 <p className="text-base lg:text-xl font-bold text-foreground truncate">{formatFlow(userInfo.flow, 'gb')}</p>
+                 <p className="text-base lg:text-xl font-bold text-foreground truncate">
+                   {formatFlow(calculateUserTotalUsedFlow())}
+                   <span className="ml-1 text-xs font-normal text-default-500">/ {formatFlow(userInfo.flow, 'gb')}</span>
+                 </p>
+                 <div className="mt-1">
+                   {renderProgressBar(calculateUsagePercentage('flow'), 'sm', userInfo.flow === 99999)}
+                   <div className="flex items-center justify-between mt-1">
+                     <p className="text-xs text-default-500 truncate">
+                       {userInfo.flow === 99999 ? '无限制' : `已用 ${calculateUsagePercentage('flow').toFixed(1)}%`}
+                     </p>
+                     {(userInfo.flowResetTime !== undefined && userInfo.flowResetTime !== null) && (
+                       <span className="text-xs text-default-500 truncate">{formatResetTime(userInfo.flowResetTime)}</span>
+                     )}
+                   </div>
+                 </div>
                </div>
              </CardBody>
            </Card>
@@ -613,30 +659,15 @@ export default function DashboardPage() {
              <CardBody className="p-3 lg:p-4">
                <div className="flex flex-col space-y-2">
                  <div className="flex items-center justify-between">
-                   <p className="text-xs lg:text-sm text-default-600 truncate">已用流量</p>
+                   <p className="text-xs lg:text-sm text-default-600 truncate">到期时间</p>
                    <div className="p-1.5 lg:p-2 bg-green-100 dark:bg-green-500/20 rounded-lg flex-shrink-0">
                      <svg className="w-4 h-4 lg:w-5 lg:h-5 text-green-600 dark:text-green-400" fill="currentColor" viewBox="0 0 20 20">
-                       <path fillRule="evenodd" d="M12 7a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0V8.414l-4.293 4.293a1 1 0 01-1.414 0L8 10.414l-4.293 4.293a1 1 0 01-1.414-1.414l5-5a1 1 0 011.414 0L11 10.586 14.586 7H12z" clipRule="evenodd" />
+                       <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
                      </svg>
                    </div>
                  </div>
-                 <p className="text-base lg:text-xl font-bold text-foreground truncate">{formatFlow(calculateUserTotalUsedFlow())}</p>
-                 <div className="mt-1">
-                   {renderProgressBar(calculateUsagePercentage('flow'), 'sm', userInfo.flow === 99999)}
-                   <div className="flex items-center justify-between mt-1">
-                     <p className="text-xs text-default-500 truncate">
-                       {userInfo.flow === 99999 ? '无限制' : `${calculateUsagePercentage('flow').toFixed(1)}%`}
-                     </p>
-                     {(userInfo.flowResetTime !== undefined && userInfo.flowResetTime !== null) && (
-                       <div className="text-xs text-default-500 flex items-center gap-1">
-                         <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                           <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
-                         </svg>
-                         <span className="truncate">{formatResetTime(userInfo.flowResetTime)}</span>
-                       </div>
-                     )}
-                   </div>
-                 </div>
+                 <p className="text-sm lg:text-lg font-bold text-foreground leading-tight">{formatExpirationDate(userInfo.expTime)}</p>
+                 <span className={`text-xs ${getExpStatus(userInfo.expTime).color}`}>{getExpStatus(userInfo.expTime).text}</span>
                </div>
              </CardBody>
            </Card>
@@ -707,13 +738,13 @@ export default function DashboardPage() {
                      <ResponsiveContainer width="100%" height="100%">
                        <LineChart data={processFlowChartData()}>
                          <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-                         <XAxis 
-                           dataKey="time" 
+                         <XAxis
+                           dataKey="time"
                            tick={{ fontSize: 12 }}
                            tickLine={false}
                            axisLine={{ stroke: '#e5e7eb', strokeWidth: 1 }}
                          />
-                         <YAxis 
+                         <YAxis
                            tick={{ fontSize: 12 }}
                            tickLine={false}
                            axisLine={{ stroke: '#e5e7eb', strokeWidth: 1 }}
@@ -725,7 +756,7 @@ export default function DashboardPage() {
                              return `${(value / (1024 * 1024 * 1024)).toFixed(1)}G`;
                            }}
                          />
-                         <Tooltip 
+                         <Tooltip
                            content={({ active, payload, label }) => {
                              if (active && payload && payload.length) {
                                return (
@@ -802,7 +833,7 @@ export default function DashboardPage() {
                            </div>
                          </div>
                        </div>
-                       
+
                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
                          <div>
                            <p className="text-sm text-default-600 mb-1">流量配额</p>
@@ -867,7 +898,7 @@ export default function DashboardPage() {
                          {group.forwards.length} 个转发
                        </span>
                      </div>
-                     
+
                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
                        {group.forwards.map((forward) => (
                          <div key={forward.id} className="bg-white dark:bg-default-100/50 border border-gray-200 dark:border-default-200 rounded-lg p-3 hover:shadow-md transition-shadow">
@@ -875,7 +906,7 @@ export default function DashboardPage() {
                             <div>
                               <h4 className="font-medium text-foreground text-sm mb-2 truncate">{forward.name}</h4>
                               <div className="space-y-1">
-                                <code 
+                                <code
                                   className={`block px-2 py-1 bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-300 rounded font-mono text-xs truncate ${hasMultipleIps(forward.inIp) ? 'cursor-pointer hover:bg-green-200 dark:hover:bg-green-500/30' : ''}`}
                                   onClick={() => hasMultipleIps(forward.inIp) && showAddressModal(forward.inIp, forward.inPort, '入口地址')}
                                   title={formatInAddress(forward.inIp, forward.inPort)}
@@ -883,7 +914,7 @@ export default function DashboardPage() {
                                   {formatInAddress(forward.inIp, forward.inPort)}
                                 </code>
                                 <div className="text-center text-default-400 text-xs">↓</div>
-                                <code 
+                                <code
                                   className={`block px-2 py-1 bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300 rounded font-mono text-xs truncate ${hasMultipleRemoteAddresses(forward.remoteAddr) ? 'cursor-pointer hover:bg-blue-200 dark:hover:bg-blue-500/30' : ''}`}
                                   onClick={() => hasMultipleRemoteAddresses(forward.remoteAddr) && showRemoteAddressModal(forward.remoteAddr, '出口地址')}
                                   title={formatRemoteAddress(forward.remoteAddr)}
@@ -892,7 +923,7 @@ export default function DashboardPage() {
                                 </code>
                               </div>
                             </div>
-                            
+
                             <div className="pt-2 border-t border-gray-200 dark:border-default-200">
                               <div className="grid grid-cols-3 gap-1 text-xs">
                                 <div className="text-center">
@@ -920,8 +951,47 @@ export default function DashboardPage() {
           </CardBody>
         </Card>
 
+        {/* 历史公告 */}
+        {announcements.length > 0 && (
+          <Card className="mt-6 lg:mt-8 border border-gray-200 dark:border-default-200 shadow-md">
+            <CardHeader className="pb-3">
+              <div className="flex items-center gap-2">
+                <svg className="w-5 h-5 text-primary" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 1a6 6 0 00-6 6v3.586l-.707.707A1 1 0 003.586 13h12.828a1 1 0 00.707-1.707L16 10.586V7a6 6 0 00-6-6zM8 15a2 2 0 004 0H8z" clipRule="evenodd" />
+                </svg>
+                <h2 className="text-lg lg:text-xl font-semibold text-foreground">历史公告</h2>
+                <span className="px-2 py-1 bg-default-100 dark:bg-default-50 text-default-600 rounded-full text-xs">
+                  {announcements.length}
+                </span>
+              </div>
+            </CardHeader>
+            <CardBody className="pt-0">
+              <div className="space-y-3">
+                {announcements.map((item) => (
+                  <div key={item.id} className="border border-gray-200 dark:border-default-100 rounded-lg p-3 lg:p-4">
+                    <div className="flex items-start justify-between gap-3 mb-1">
+                      <h3 className="font-semibold text-foreground">{item.title}</h3>
+                      <span className="text-xs text-default-500 flex-shrink-0">
+                        {item.publishedTime || item.createdTime
+                          ? new Date(item.publishedTime || item.createdTime || 0).toLocaleString('zh-CN', {
+                              year: 'numeric', month: '2-digit', day: '2-digit',
+                              hour: '2-digit', minute: '2-digit', hour12: false,
+                            })
+                          : ''}
+                      </span>
+                    </div>
+                    <p className="text-sm text-default-600 dark:text-default-400 whitespace-pre-wrap break-words">
+                      {item.content}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </CardBody>
+          </Card>
+        )}
+
         {/* 地址列表弹窗 */}
-        <Modal isOpen={addressModalOpen} onClose={() => setAddressModalOpen(false)} size="2xl" 
+        <Modal isOpen={addressModalOpen} onClose={() => setAddressModalOpen(false)} size="2xl"
         scrollBehavior="outside"
         backdrop="blur"
         placement="center">
@@ -933,7 +1003,7 @@ export default function DashboardPage() {
                   复制全部
                 </Button>
               </div>
-              
+
               <div className="space-y-2 max-h-60 overflow-y-auto">
                 {addressList.map((item) => (
                   <div key={item.id} className="flex justify-between items-center p-3 border border-default-200 dark:border-default-100 rounded-lg">
@@ -953,6 +1023,6 @@ export default function DashboardPage() {
           </ModalContent>
         </Modal>
       </div>
-          
+
   );
-} 
+}

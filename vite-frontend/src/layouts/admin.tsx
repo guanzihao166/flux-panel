@@ -10,6 +10,8 @@ import { Logo } from '@/components/icons';
 import { updatePassword } from '@/api';
 import { safeLogout } from '@/utils/logout';
 import { siteConfig } from '@/config/site';
+import { ThemeSwitcher } from '@/components/theme-switcher';
+import AnnouncementPopup from '@/components/announcement-popup';
 
 interface MenuItem {
   path: string;
@@ -115,6 +117,16 @@ export default function AdminLayout({
         </svg>
       ),
       adminOnly: true
+    },
+    {
+      path: '/announcement',
+      label: '公告管理',
+      icon: (
+        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+          <path fillRule="evenodd" d="M10 1a6 6 0 00-6 6v3.586l-.707.707A1 1 0 003.586 13h12.828a1 1 0 00.707-1.707L16 10.586V7a6 6 0 00-6-6zM8 15a2 2 0 004 0H8z" clipRule="evenodd" />
+        </svg>
+      ),
+      adminOnly: true
     }
   ];
 
@@ -129,7 +141,7 @@ export default function AdminLayout({
   useEffect(() => {
     // 获取用户信息
     const name = localStorage.getItem('name') || 'Admin';
-    
+
     // 兼容处理：如果没有admin字段，根据role_id判断（0为管理员）
     let adminFlag = localStorage.getItem('admin') === 'true';
     if (localStorage.getItem('admin') === null) {
@@ -138,7 +150,7 @@ export default function AdminLayout({
       // 补充设置admin字段，避免下次再次判断
       localStorage.setItem('admin', adminFlag.toString());
     }
-    
+
     setUsername(name);
     setIsAdmin(adminFlag);
 
@@ -237,7 +249,7 @@ export default function AdminLayout({
   };
 
   // 过滤菜单项（根据权限）
-  const filteredMenuItems = menuItems.filter(item => 
+  const filteredMenuItems = menuItems.filter(item =>
     !item.adminOnly || isAdmin
   );
 
@@ -245,7 +257,7 @@ export default function AdminLayout({
           <div className={`flex ${isMobile ? 'min-h-screen' : 'h-screen'} bg-gray-100 dark:bg-black`}>
       {/* 移动端遮罩层 */}
       {isMobile && mobileMenuVisible && (
-        <div 
+        <div
           className="fixed inset-0 backdrop-blur-sm bg-white/50 dark:bg-black/30 z-40"
           onClick={hideMobileMenu}
         />
@@ -253,13 +265,13 @@ export default function AdminLayout({
 
       {/* 左侧菜单栏 */}
       <aside className={`
-        ${isMobile ? 'fixed' : 'relative'} 
+        ${isMobile ? 'fixed' : 'relative'}
         ${isMobile && !mobileMenuVisible ? '-translate-x-full' : 'translate-x-0'}
-        ${isMobile ? 'w-64' : 'w-72'} 
-        bg-white dark:bg-black 
-        shadow-lg 
+        ${isMobile ? 'w-64' : 'w-72'}
+        bg-white dark:bg-black
+        shadow-lg
         border-r border-gray-200 dark:border-gray-600
-        z-50 
+        z-50
         transition-transform duration-300 ease-in-out
         flex flex-col
         ${isMobile ? 'h-screen' : 'h-full'}
@@ -288,8 +300,8 @@ export default function AdminLayout({
                      className={`
                        w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left
                        transition-colors duration-200 min-h-[44px]
-                       ${isActive 
-                         ? 'bg-primary-100 dark:bg-primary-600/20 text-primary-600 dark:text-primary-300' 
+                       ${isActive
+                         ? 'bg-primary-100 dark:bg-primary-600/20 text-primary-600 dark:text-primary-300'
                          : 'text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-900'
                        }
                      `}
@@ -310,9 +322,9 @@ export default function AdminLayout({
           <div className="text-center">
             <p className="text-xs text-gray-400 dark:text-gray-500">
               Powered by{' '}
-              <a 
-                href="https://github.com/bqlpfy/flux-panel" 
-                target="_blank" 
+              <a
+                href="https://github.com/bqlpfy/flux-panel"
+                target="_blank"
                 rel="noopener noreferrer"
                 className="text-gray-500 dark:text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
               >
@@ -344,6 +356,7 @@ export default function AdminLayout({
           </div>
 
           <div className="flex items-center gap-3">
+            <ThemeSwitcher compact />
             {/* 用户菜单 */}
              <Dropdown placement="bottom-end">
                <DropdownTrigger>
@@ -391,8 +404,8 @@ export default function AdminLayout({
       </div>
 
       {/* 修改密码弹窗 */}
-      <Modal 
-        isOpen={isOpen} 
+      <Modal
+        isOpen={isOpen}
         onOpenChange={() => {
           onOpenChange();
           resetPasswordForm();
@@ -445,8 +458,8 @@ export default function AdminLayout({
                 <Button color="default" variant="light" onPress={onClose}>
                   取消
                 </Button>
-                <Button 
-                  color="primary" 
+                <Button
+                  color="primary"
                   onPress={handlePasswordSubmit}
                   isLoading={passwordLoading}
                 >
@@ -457,6 +470,9 @@ export default function AdminLayout({
           )}
         </ModalContent>
       </Modal>
+
+      {/* 全局公告弹窗（仅普通用户） */}
+      <AnnouncementPopup />
     </div>
   );
-} 
+}

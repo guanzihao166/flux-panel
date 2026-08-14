@@ -11,10 +11,10 @@ import { Alert } from "@heroui/alert";
 import toast from 'react-hot-toast';
 
 
-import { 
-  createTunnel, 
-  getTunnelList, 
-  updateTunnel, 
+import {
+  createTunnel,
+  getTunnelList,
+  updateTunnel,
   deleteTunnel,
   getNodeList,
   diagnoseTunnel
@@ -36,6 +36,12 @@ interface Tunnel {
   trafficRatio: number;
   status: number;
   createdTime: string;
+  outNodeIds?: string;
+  outNodeWeights?: string;
+  chainNodeIds?: string;
+  balanceStrategy?: string;
+  maxFails?: number;
+  failTimeout?: number;
 }
 
 interface Node {
@@ -57,6 +63,12 @@ interface TunnelForm {
   flow: number;
   trafficRatio: number;
   status: number;
+  outNodeIds: string;
+  outNodeWeights: string;
+  chainNodeIds: string;
+  balanceStrategy: string;
+  maxFails: number;
+  failTimeout: number;
 }
 
 interface DiagnosisResult {
@@ -80,7 +92,7 @@ export default function TunnelPage() {
   const [loading, setLoading] = useState(true);
   const [tunnels, setTunnels] = useState<Tunnel[]>([]);
   const [nodes, setNodes] = useState<Node[]>([]);
-  
+
   // 模态框状态
   const [modalOpen, setModalOpen] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
@@ -92,7 +104,7 @@ export default function TunnelPage() {
   const [tunnelToDelete, setTunnelToDelete] = useState<Tunnel | null>(null);
   const [currentDiagnosisTunnel, setCurrentDiagnosisTunnel] = useState<Tunnel | null>(null);
   const [diagnosisResult, setDiagnosisResult] = useState<DiagnosisResult | null>(null);
-  
+
   // 表单状态
   const [form, setForm] = useState<TunnelForm>({
     name: '',
@@ -105,9 +117,15 @@ export default function TunnelPage() {
     interfaceName: '',
     flow: 1,
     trafficRatio: 1.0,
-    status: 1
+    status: 1,
+    outNodeIds: '',
+    outNodeWeights: '',
+    chainNodeIds: '',
+    balanceStrategy: 'fifo',
+    maxFails: 1,
+    failTimeout: 30
   });
-  
+
   // 表单验证错误
   const [errors, setErrors] = useState<{[key: string]: string}>({});
 
@@ -123,13 +141,13 @@ export default function TunnelPage() {
         getTunnelList(),
         getNodeList()
       ]);
-      
+
       if (tunnelsRes.code === 0) {
         setTunnels(tunnelsRes.data || []);
       } else {
         toast.error(tunnelsRes.msg || '获取隧道列表失败');
       }
-      
+
       if (nodesRes.code === 0) {
         setNodes(nodesRes.data || []);
       } else {
@@ -146,42 +164,43 @@ export default function TunnelPage() {
   // 表单验证
   const validateForm = (): boolean => {
     const newErrors: {[key: string]: string} = {};
-    
+
     if (!form.name.trim()) {
       newErrors.name = '请输入隧道名称';
     } else if (form.name.length < 2 || form.name.length > 50) {
       newErrors.name = '隧道名称长度应在2-50个字符之间';
     }
-    
+
     if (!form.inNodeId) {
       newErrors.inNodeId = '请选择入口节点';
     }
-    
+
     if (!form.tcpListenAddr.trim()) {
       newErrors.tcpListenAddr = '请输入TCP监听地址';
     }
-    
+
     if (!form.udpListenAddr.trim()) {
       newErrors.udpListenAddr = '请输入UDP监听地址';
     }
-    
+
     if (form.trafficRatio < 0.0 || form.trafficRatio > 100.0) {
       newErrors.trafficRatio = '流量倍率必须在0.0-100.0之间';
     }
-    
+
     // 隧道转发时的验证
     if (form.type === 2) {
-      if (!form.outNodeId) {
-        newErrors.outNodeId = '请选择出口节点';
-      } else if (form.inNodeId === form.outNodeId) {
-        newErrors.outNodeId = '隧道转发模式下，入口和出口不能是同一个节点';
+      const outputIds = form.outNodeIds.split(',').map(v => Number(v.trim())).filter(Boolean);
+      if (outputIds.length === 0) {
+        newErrors.outNodeIds = '请至少选择一个出口节点';
+      } else if (form.inNodeId && outputIds.includes(form.inNodeId)) {
+        newErrors.outNodeIds = '入口节点不能同时作为出口节点';
       }
-      
+
       if (!form.protocol) {
         newErrors.protocol = '请选择协议类型';
       }
     }
-    
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -200,7 +219,13 @@ export default function TunnelPage() {
       interfaceName: '',
       flow: 1,
       trafficRatio: 1.0,
-      status: 1
+      status: 1,
+      outNodeIds: '',
+      outNodeWeights: '',
+      chainNodeIds: '',
+      balanceStrategy: 'fifo',
+      maxFails: 1,
+      failTimeout: 30
     });
     setErrors({});
     setModalOpen(true);
@@ -221,7 +246,13 @@ export default function TunnelPage() {
       interfaceName: tunnel.interfaceName || '',
       flow: tunnel.flow,
       trafficRatio: tunnel.trafficRatio,
-      status: tunnel.status
+      status: tunnel.status,
+      outNodeIds: tunnel.outNodeIds || (tunnel.outNodeId ? String(tunnel.outNodeId) : ''),
+      outNodeWeights: tunnel.outNodeWeights || '1',
+      chainNodeIds: tunnel.chainNodeIds || '',
+      balanceStrategy: tunnel.balanceStrategy || 'fifo',
+      maxFails: tunnel.maxFails || 1,
+      failTimeout: tunnel.failTimeout || 30
     });
     setErrors({});
     setModalOpen(true);
@@ -235,7 +266,7 @@ export default function TunnelPage() {
 
   const confirmDelete = async () => {
     if (!tunnelToDelete) return;
-    
+
     setDeleteLoading(true);
     try {
       const response = await deleteTunnel(tunnelToDelete.id);
@@ -268,15 +299,15 @@ export default function TunnelPage() {
   // 提交表单
   const handleSubmit = async () => {
     if (!validateForm()) return;
-    
+
     setSubmitLoading(true);
     try {
       const data = { ...form };
-      
-      const response = isEdit 
+
+      const response = isEdit
         ? await updateTunnel(data)
         : await createTunnel(data);
-        
+
       if (response.code === 0) {
         toast.success(isEdit ? '更新成功' : '创建成功');
         setModalOpen(false);
@@ -345,12 +376,12 @@ export default function TunnelPage() {
   // 获取显示的IP（处理多IP）
   const getDisplayIp = (ipString?: string): string => {
     if (!ipString) return '-';
-    
+
     const ips = ipString.split(',').map(ip => ip.trim()).filter(ip => ip);
-    
+
     if (ips.length === 0) return '-';
     if (ips.length === 1) return ips[0];
-    
+
     return `${ips[0]} 等${ips.length}个`;
   };
 
@@ -401,7 +432,7 @@ export default function TunnelPage() {
   // 获取连接质量
   const getQualityDisplay = (averageTime?: number, packetLoss?: number) => {
     if (averageTime === undefined || packetLoss === undefined) return null;
-    
+
     if (averageTime < 30 && packetLoss === 0) return { text: '🚀 优秀', color: 'success' };
     if (averageTime < 50 && packetLoss === 0) return { text: '✨ 很好', color: 'success' };
     if (averageTime < 100 && packetLoss < 1) return { text: '👍 良好', color: 'primary' };
@@ -412,19 +443,19 @@ export default function TunnelPage() {
 
   if (loading) {
     return (
-      
+
         <div className="flex items-center justify-center h-64">
           <div className="flex items-center gap-3">
             <Spinner size="sm" />
             <span className="text-default-600">正在加载...</span>
           </div>
         </div>
-      
+
     );
   }
 
   return (
-    
+
       <div className="px-3 lg:px-6 py-8">
         {/* 页面头部 */}
         <div className="flex items-center justify-between mb-6">
@@ -436,11 +467,11 @@ export default function TunnelPage() {
               variant="flat"
               color="primary"
               onPress={handleAdd}
-             
+
             >
               新增
             </Button>
-     
+
         </div>
 
         {/* 隧道卡片网格 */}
@@ -449,7 +480,7 @@ export default function TunnelPage() {
             {tunnels.map((tunnel) => {
               const statusDisplay = getStatusDisplay(tunnel.status);
               const typeDisplay = getTypeDisplay(tunnel.type);
-              
+
               return (
                 <Card key={tunnel.id} className="shadow-sm border border-divider hover:shadow-md transition-shadow duration-200">
                   <CardHeader className="pb-2">
@@ -457,17 +488,17 @@ export default function TunnelPage() {
                       <div className="flex-1 min-w-0">
                         <h3 className="font-semibold text-foreground truncate text-sm">{tunnel.name}</h3>
                         <div className="flex items-center gap-1.5 mt-1">
-                          <Chip 
-                            color={typeDisplay.color as any} 
-                            variant="flat" 
+                          <Chip
+                            color={typeDisplay.color as any}
+                            variant="flat"
                             size="sm"
                             className="text-xs"
                           >
                             {typeDisplay.text}
                           </Chip>
-                          <Chip 
-                            color={statusDisplay.color as any} 
-                            variant="flat" 
+                          <Chip
+                            color={statusDisplay.color as any}
+                            variant="flat"
                             size="sm"
                             className="text-xs"
                           >
@@ -477,7 +508,7 @@ export default function TunnelPage() {
                       </div>
                     </div>
                   </CardHeader>
-                  
+
                   <CardBody className="pt-0 pb-3">
                     <div className="space-y-2">
                       {/* 流程展示 */}
@@ -493,13 +524,13 @@ export default function TunnelPage() {
                             {getDisplayIp(tunnel.inIp)}
                           </code>
                         </div>
-                        
+
                         <div className="text-center py-0.5">
                           <svg className="w-3 h-3 text-default-400 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
                           </svg>
                         </div>
-                        
+
                         <div className="p-2 bg-default-50 dark:bg-default-100/50 rounded border border-default-200 dark:border-default-300">
                           <div className="flex items-center justify-between mb-1">
                             <span className="text-xs font-medium text-default-600">
@@ -530,7 +561,7 @@ export default function TunnelPage() {
                       </div>
 
                     </div>
-                    
+
                     <div className="flex gap-1.5 mt-3">
                       <Button
                         size="sm"
@@ -601,7 +632,7 @@ export default function TunnelPage() {
         )}
 
         {/* 新增/编辑模态框 */}
-        <Modal 
+        <Modal
           isOpen={modalOpen}
           onOpenChange={setModalOpen}
           size="2xl"
@@ -631,7 +662,7 @@ export default function TunnelPage() {
                       errorMessage={errors.name}
                       variant="bordered"
                     />
-                    
+
                     <Select
                       label="隧道类型"
                       placeholder="请选择隧道类型"
@@ -675,8 +706,8 @@ export default function TunnelPage() {
                         placeholder="请输入流量倍率"
                         type="number"
                         value={form.trafficRatio.toString()}
-                        onChange={(e) => setForm(prev => ({ 
-                          ...prev, 
+                        onChange={(e) => setForm(prev => ({
+                          ...prev,
                           trafficRatio: parseFloat(e.target.value) || 0
                         }))}
                         isInvalid={!!errors.trafficRatio}
@@ -709,15 +740,15 @@ export default function TunnelPage() {
                       isDisabled={isEdit}
                     >
                       {nodes.map((node) => (
-                        <SelectItem 
+                        <SelectItem
                           key={node.id}
                           textValue={`${node.name} (${node.status === 1 ? '在线' : '离线'})`}
                         >
                           <div className="flex items-center justify-between">
                             <span>{node.name}</span>
-                            <Chip 
-                              color={node.status === 1 ? 'success' : 'danger'} 
-                              variant="flat" 
+                            <Chip
+                              color={node.status === 1 ? 'success' : 'danger'}
+                              variant="flat"
                               size="sm"
                             >
                               {node.status === 1 ? '在线' : '离线'}
@@ -801,31 +832,33 @@ export default function TunnelPage() {
                         </Select>
 
                         <Select
-                          label="出口节点"
-                          placeholder="请选择出口节点"
-                          selectedKeys={form.outNodeId ? [form.outNodeId.toString()] : []}
+                          label="出口节点（可多选）"
+                          placeholder="请选择一个或多个出口节点"
+                          selectionMode="multiple"
+                          selectedKeys={new Set(form.outNodeIds.split(',').filter(Boolean))}
                           onSelectionChange={(keys) => {
-                            const selectedKey = Array.from(keys)[0] as string;
-                            if (selectedKey) {
-                              setForm(prev => ({ ...prev, outNodeId: parseInt(selectedKey) }));
-                            }
+                            const values = Array.from(keys).map(String);
+                            setForm(prev => ({ ...prev,
+                              outNodeIds: values.join(','),
+                              outNodeId: values.length ? Number(values[0]) : null,
+                              outNodeWeights: values.map((_, i) => prev.outNodeWeights.split(',')[i] || '1').join(',')
+                            }));
                           }}
-                          isInvalid={!!errors.outNodeId}
-                          errorMessage={errors.outNodeId}
+                          isInvalid={!!errors.outNodeIds}
+                          errorMessage={errors.outNodeIds}
                           variant="bordered"
-                          isDisabled={isEdit}
                         >
                           {nodes.map((node) => (
-                            <SelectItem 
+                            <SelectItem
                               key={node.id}
                               textValue={`${node.name} (${node.status === 1 ? '在线' : '离线'})`}
                             >
                               <div className="flex items-center justify-between">
                                 <span>{node.name}</span>
                                 <div className="flex items-center gap-2">
-                                  <Chip 
-                                    color={node.status === 1 ? 'success' : 'danger'} 
-                                    variant="flat" 
+                                  <Chip
+                                    color={node.status === 1 ? 'success' : 'danger'}
+                                    variant="flat"
                                     size="sm"
                                   >
                                     {node.status === 1 ? '在线' : '离线'}
@@ -840,6 +873,52 @@ export default function TunnelPage() {
                             </SelectItem>
                           ))}
                         </Select>
+
+                        <Select
+                          label="转发链 agents（按选择顺序）"
+                          placeholder="可选中继节点"
+                          selectionMode="multiple"
+                          selectedKeys={new Set(form.chainNodeIds.split(',').filter(Boolean))}
+                          onSelectionChange={(keys) => setForm(prev => ({ ...prev, chainNodeIds: Array.from(keys).map(String).join(',') }))}
+                          variant="bordered"
+                          description="链路：入口 → 中继 agents → 出口 → 目标"
+                        >
+                          {nodes.map(node => <SelectItem key={node.id}>{node.name}</SelectItem>)}
+                        </Select>
+                        <Input
+                          label="转发链顺序（agent ID）"
+                          value={form.chainNodeIds}
+                          onChange={(e) => setForm(prev => ({ ...prev, chainNodeIds: e.target.value }))}
+                          placeholder="例如 3,7,5"
+                          description="严格按从左到右的顺序经过；可用上方多选快速填入"
+                          variant="bordered"
+                        />
+
+                        <Select
+                          label="出口负载与故障策略"
+                          selectedKeys={[form.balanceStrategy]}
+                          onSelectionChange={(keys) => setForm(prev => ({ ...prev, balanceStrategy: String(Array.from(keys)[0] || 'fifo') }))}
+                          variant="bordered"
+                        >
+                          <SelectItem key="fifo">故障切换（主备顺序）</SelectItem>
+                          <SelectItem key="round">轮询</SelectItem>
+                          <SelectItem key="wrr">加权轮询</SelectItem>
+                        </Select>
+
+                        {form.balanceStrategy === 'wrr' && (
+                          <Input label="出口权重" value={form.outNodeWeights}
+                            onChange={(e) => setForm(prev => ({ ...prev, outNodeWeights: e.target.value }))}
+                            placeholder="例如 5,2,1" description="与出口节点顺序一致，范围 1-100" variant="bordered" />
+                        )}
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <Input type="number" label="失败阈值" value={String(form.maxFails)}
+                            onChange={(e) => setForm(prev => ({ ...prev, maxFails: Number(e.target.value) }))}
+                            min={1} max={10} variant="bordered" />
+                          <Input type="number" label="故障恢复时间（秒）" value={String(form.failTimeout)}
+                            onChange={(e) => setForm(prev => ({ ...prev, failTimeout: Number(e.target.value) }))}
+                            min={5} max={3600} variant="bordered" />
+                        </div>
                       </>
                     )}
 
@@ -863,8 +942,8 @@ export default function TunnelPage() {
                   <Button variant="light" onPress={onClose}>
                     取消
                   </Button>
-                  <Button 
-                    color="primary" 
+                  <Button
+                    color="primary"
                     onPress={handleSubmit}
                     isLoading={submitLoading}
                   >
@@ -877,7 +956,7 @@ export default function TunnelPage() {
         </Modal>
 
         {/* 删除确认模态框 */}
-        <Modal 
+        <Modal
           isOpen={deleteModalOpen}
           onOpenChange={setDeleteModalOpen}
           size="2xl"
@@ -899,8 +978,8 @@ export default function TunnelPage() {
                   <Button variant="light" onPress={onClose}>
                     取消
                   </Button>
-                  <Button 
-                    color="danger" 
+                  <Button
+                    color="danger"
                     onPress={confirmDelete}
                     isLoading={deleteLoading}
                   >
@@ -913,7 +992,7 @@ export default function TunnelPage() {
         </Modal>
 
         {/* 诊断结果模态框 */}
-        <Modal 
+        <Modal
           isOpen={diagnosisModalOpen}
           onOpenChange={setDiagnosisModalOpen}
           size="2xl"
@@ -929,9 +1008,9 @@ export default function TunnelPage() {
                   {currentDiagnosisTunnel && (
                     <div className="flex items-center gap-2">
                       <span className="text-small text-default-500">{currentDiagnosisTunnel.name}</span>
-                      <Chip 
-                        color={currentDiagnosisTunnel.type === 1 ? 'primary' : 'secondary'} 
-                        variant="flat" 
+                      <Chip
+                        color={currentDiagnosisTunnel.type === 1 ? 'primary' : 'secondary'}
+                        variant="flat"
                         size="sm"
                       >
                         {currentDiagnosisTunnel.type === 1 ? '端口转发' : '隧道转发'}
@@ -951,7 +1030,7 @@ export default function TunnelPage() {
                     <div className="space-y-4">
                       {diagnosisResult.results.map((result, index) => {
                         const quality = getQualityDisplay(result.averageTime, result.packetLoss);
-                        
+
                         return (
                           <Card key={index} className={`shadow-sm border ${result.success ? 'border-success' : 'border-danger'}`}>
                             <CardHeader className="pb-2">
@@ -967,8 +1046,8 @@ export default function TunnelPage() {
                                     <p className="text-small text-default-500">{result.nodeName}</p>
                                   </div>
                                 </div>
-                                <Chip 
-                                  color={result.success ? 'success' : 'danger'} 
+                                <Chip
+                                  color={result.success ? 'success' : 'danger'}
                                   variant="flat"
                                 >
                                   {result.success ? '成功' : '失败'}
@@ -1036,8 +1115,8 @@ export default function TunnelPage() {
                     关闭
                   </Button>
                   {currentDiagnosisTunnel && (
-                    <Button 
-                      color="primary" 
+                    <Button
+                      color="primary"
                       onPress={() => handleDiagnose(currentDiagnosisTunnel)}
                       isLoading={diagnosisLoading}
                     >
@@ -1050,6 +1129,6 @@ export default function TunnelPage() {
           </ModalContent>
         </Modal>
       </div>
-    
+
   );
-} 
+}

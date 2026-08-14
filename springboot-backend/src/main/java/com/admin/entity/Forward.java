@@ -6,7 +6,7 @@ import lombok.EqualsAndHashCode;
 
 /**
  * <p>
- * 
+ *
  * </p>
  *
  * @author QAQ
@@ -41,5 +41,16 @@ public class Forward extends BaseEntity{
     private Long outFlow;
 
     private Integer inx;
+
+    private Double latencyMs;
+
+    private Integer probeStatus;
+
+    private Long probeTime;
+
+    private String probeMessage;
+
+    /** 与 remoteAddr 逗号分隔目标对齐的正整数权重。 */
+    private String targetWeights;
 
 }

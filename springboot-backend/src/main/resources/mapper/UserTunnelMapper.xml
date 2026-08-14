@@ -4,7 +4,7 @@
 
     <!-- 获取用户隧道权限及隧道详细信息 -->
     <select id="getUserTunnelWithDetails" resultType="com.admin.common.dto.UserTunnelWithDetailDto">
-        SELECT 
+        SELECT
             ut.id,
             ut.user_id as userId,
             ut.tunnel_id as tunnelId,

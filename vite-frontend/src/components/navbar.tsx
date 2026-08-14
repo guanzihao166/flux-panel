@@ -10,6 +10,7 @@ import { useNavigate } from "react-router-dom";
 
 import { Logo } from "@/components/icons";
 import { siteConfig, getCachedConfig } from "@/config/site";
+import { ThemeSwitcher } from '@/components/theme-switcher';
 
 export const Navbar = () => {
   const navigate = useNavigate();
@@ -55,7 +56,7 @@ export const Navbar = () => {
     };
 
     window.addEventListener('configUpdated', handleConfigUpdate);
-    
+
     return () => {
       clearTimeout(timer);
       window.removeEventListener('configUpdated', handleConfigUpdate);
@@ -79,6 +80,7 @@ export const Navbar = () => {
         </NavbarContent>
 
         <NavbarContent className="basis-1/5 sm:basis-full" justify="end">
+          <ThemeSwitcher compact />
           {/* WebView设置图标 */}
           {isWebView && (
             <button

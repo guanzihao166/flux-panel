@@ -4,6 +4,8 @@ import { Button } from "@heroui/button";
 
 import { Logo } from '@/components/icons';
 import { siteConfig } from '@/config/site';
+import { ThemeSwitcher } from '@/components/theme-switcher';
+import AnnouncementPopup from '@/components/announcement-popup';
 
 export default function H5SimpleLayout({
   children,
@@ -12,7 +14,7 @@ export default function H5SimpleLayout({
 }) {
   const navigate = useNavigate();
   const location = useLocation();
-  
+
   // 路由切换时回到顶部，避免上一页滚动位置保留
   React.useEffect(() => {
     try {
@@ -48,6 +50,7 @@ export default function H5SimpleLayout({
         </div>
 
         <div className="flex items-center gap-2">
+          <ThemeSwitcher compact />
         </div>
       </header>
 
@@ -55,6 +58,9 @@ export default function H5SimpleLayout({
       <main className="flex-1 bg-gray-100 dark:bg-black pb-0">
         {children}
       </main>
+
+      {/* 全局公告弹窗（仅普通用户） */}
+      <AnnouncementPopup />
     </div>
   );
 }

@@ -5,17 +5,17 @@ import { Card, CardBody } from "@heroui/card";
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { reinitializeBaseURL } from '@/api/network';
-import { 
-  getPanelAddresses, 
-  savePanelAddress, 
-  setCurrentPanelAddress, 
-  deletePanelAddress, 
+import {
+  getPanelAddresses,
+  savePanelAddress,
+  setCurrentPanelAddress,
+  deletePanelAddress,
   validatePanelAddress,
 } from '@/utils/panel';
 
 interface PanelAddress {
   name: string;
-  address: string;   
+  address: string;
   inx: boolean;
 }
 
@@ -28,7 +28,7 @@ export const SettingsPage = () => {
 
 
   const setPanelAddressesFunc = (newAddress: PanelAddress[]) => {
-    setPanelAddresses(newAddress); 
+    setPanelAddresses(newAddress);
   }
 
   // 加载面板地址列表

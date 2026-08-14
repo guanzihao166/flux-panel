@@ -10,24 +10,24 @@ import javax.validation.constraints.Max;
 
 @Data
 public class ForwardUpdateDto {
-    
+
     @NotNull(message = "ID不能为空")
     private Long id;
-    
+
     @NotNull(message = "用户ID不能为空")
     private Integer userId;
-    
+
     @NotBlank(message = "转发名称不能为空")
     private String name;
-    
+
     @NotNull(message = "隧道ID不能为空")
     private Integer tunnelId;
-    
+
     @NotBlank(message = "远程地址不能为空")
     private String remoteAddr;
 
     private String strategy;
-    
+
     /**
      * 入口端口（可选，为空时自动分配）
      */
@@ -37,4 +37,6 @@ public class ForwardUpdateDto {
 
     @TableField(updateStrategy = FieldStrategy.IGNORED)
     private String interfaceName;
-} 
+
+    private String targetWeights;
+}

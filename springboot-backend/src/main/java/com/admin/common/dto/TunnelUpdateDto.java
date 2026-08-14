@@ -13,16 +13,16 @@ import java.math.BigDecimal;
 
 @Data
 public class TunnelUpdateDto {
-    
+
     @NotNull(message = "隧道ID不能为空")
     private Long id;
-    
+
     @NotBlank(message = "隧道名称不能为空")
     private String name;
-    
+
     @NotNull(message = "流量计算类型不能为空")
     private Integer flow;
-    
+
     // 流量倍率
     @DecimalMin(value = "0.0", inclusive = false, message = "流量倍率必须大于0.0")
     @DecimalMax(value = "100.0", message = "流量倍率不能大于100.0")
@@ -34,11 +34,23 @@ public class TunnelUpdateDto {
     // TCP监听地址
     @NotBlank
     private String tcpListenAddr;
-    
+
     // UDP监听地址
     @NotBlank
     private String udpListenAddr;
 
     @TableField(updateStrategy = FieldStrategy.IGNORED)
     private String interfaceName;
-} 
+
+    private String outNodeIds;
+
+    private String outNodeWeights;
+
+    private String chainNodeIds;
+
+    private String balanceStrategy;
+
+    private Integer maxFails;
+
+    private Integer failTimeout;
+}

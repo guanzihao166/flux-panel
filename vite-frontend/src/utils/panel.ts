@@ -58,20 +58,20 @@ export function validatePanelAddress(address: string): boolean {
 
     // 使用URL构造函数验证完整URL格式
     const url = new URL(address);
-    
+
     // 检查主机名不能为空
     if (!url.hostname || url.hostname.trim() === '') {
       return false;
     }
-    
+
     // 检查主机名
     const hostname = url.hostname;
-    
+
     // 支持 localhost
     if (hostname === 'localhost') {
       return true;
     }
-    
+
     // 支持 IPv4 地址
     const ipv4Pattern = /^(\d{1,3}\.){3}\d{1,3}$/;
     if (ipv4Pattern.test(hostname)) {
@@ -81,23 +81,22 @@ export function validatePanelAddress(address: string): boolean {
         return num >= 0 && num <= 255;
       });
     }
-    
+
     // 支持 IPv6 地址
     const ipv6Pattern = /^\[([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\]$|^\[([0-9a-fA-F]{1,4}:)*:([0-9a-fA-F]{1,4}:)*[0-9a-fA-F]{1,4}\]$/;
     if (ipv6Pattern.test(hostname)) {
       return true;
     }
-    
+
     // 支持域名
     const domainPattern = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$/;
     if (domainPattern.test(hostname)) {
       return true;
     }
-    
+
     return false;
   } catch (error) {
     // URL构造函数失败说明格式不正确
     return false;
   }
 }
-

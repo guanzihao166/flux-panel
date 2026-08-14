@@ -12,7 +12,7 @@ public class Md5Util {
 
     private static final String MD5_ALGORITHM = "MD5";
     private static final String DEFAULT_SALT = "admin_salt_2024";
-    
+
     /**
      * 基础MD5加密
      *
@@ -23,7 +23,7 @@ public class Md5Util {
         if (input == null || input.isEmpty()) {
             return null;
         }
-        
+
         try {
             MessageDigest md = MessageDigest.getInstance(MD5_ALGORITHM);
             byte[] digest = md.digest(input.getBytes());
@@ -32,7 +32,7 @@ public class Md5Util {
             throw new RuntimeException("MD5算法不可用", e);
         }
     }
-    
+
     /**
      * MD5加密（使用默认盐值）
      *
@@ -42,7 +42,7 @@ public class Md5Util {
     public static String md5WithSalt(String input) {
         return md5WithSalt(input, DEFAULT_SALT);
     }
-    
+
     /**
      * MD5加密（使用自定义盐值）
      *
@@ -54,14 +54,14 @@ public class Md5Util {
         if (input == null || input.isEmpty()) {
             return null;
         }
-        
+
         if (salt == null) {
             salt = DEFAULT_SALT;
         }
-        
+
         return md5(input + salt);
     }
-    
+
     /**
      * 生成随机盐值
      *
@@ -74,7 +74,7 @@ public class Md5Util {
         random.nextBytes(salt);
         return Base64.getEncoder().encodeToString(salt);
     }
-    
+
     /**
      * 生成默认长度（16字节）的随机盐值
      *
@@ -83,7 +83,7 @@ public class Md5Util {
     public static String generateSalt() {
         return generateSalt(16);
     }
-    
+
     /**
      * 验证密码
      *
@@ -95,11 +95,11 @@ public class Md5Util {
         if (password == null || hashedPassword == null) {
             return false;
         }
-        
+
         String encrypted = md5WithSalt(password);
         return encrypted.equals(hashedPassword);
     }
-    
+
     /**
      * 验证密码（使用自定义盐值）
      *
@@ -112,11 +112,11 @@ public class Md5Util {
         if (password == null || hashedPassword == null) {
             return false;
         }
-        
+
         String encrypted = md5WithSalt(password, salt);
         return encrypted.equals(hashedPassword);
     }
-    
+
     /**
      * 多次MD5加密
      *
@@ -128,14 +128,14 @@ public class Md5Util {
         if (input == null || input.isEmpty() || times <= 0) {
             return input;
         }
-        
+
         String result = input;
         for (int i = 0; i < times; i++) {
             result = md5(result);
         }
         return result;
     }
-    
+
     /**
      * 字节数组转十六进制字符串
      *
@@ -149,7 +149,7 @@ public class Md5Util {
         }
         return result.toString();
     }
-    
+
     /**
      * 获取文件的MD5值
      *
@@ -160,7 +160,7 @@ public class Md5Util {
         if (bytes == null || bytes.length == 0) {
             return null;
         }
-        
+
         try {
             MessageDigest md = MessageDigest.getInstance(MD5_ALGORITHM);
             byte[] digest = md.digest(bytes);

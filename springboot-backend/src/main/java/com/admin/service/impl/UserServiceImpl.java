@@ -9,6 +9,8 @@ import com.admin.common.lang.R;
 import com.admin.common.utils.GostUtil;
 import com.admin.common.utils.JwtUtil;
 import com.admin.common.utils.Md5Util;
+import com.admin.common.utils.HttpContextUtils;
+import com.admin.common.utils.IpUtils;
 import com.admin.entity.*;
 import com.admin.mapper.ForwardMapper;
 import com.admin.mapper.UserMapper;
@@ -43,23 +45,23 @@ import java.util.Objects;
 public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements UserService {
 
     // ========== 常量定义 ==========
-    
+
     /** 用户角色常量 */
     private static final int ADMIN_ROLE_ID = 0;        // 管理员角色ID
     private static final int USER_ROLE_ID = 1;         // 普通用户角色ID
-    
+
     /** 用户状态常量 */
     private static final int USER_STATUS_ACTIVE = 1;   // 用户启用状态
     private static final int USER_STATUS_DISABLED = 0; // 用户停用状态
-    
+
     /** 隧道类型常量 */
     private static final int TUNNEL_TYPE_TUNNEL_FORWARD = 2; // 隧道转发类型
-    
+
     /** 成功响应消息 */
     private static final String SUCCESS_CREATE_MSG = "用户创建成功";
     private static final String SUCCESS_UPDATE_MSG = "用户更新成功";
     private static final String SUCCESS_DELETE_MSG = "用户及关联数据删除成功";
-    
+
     /** 错误响应消息 */
     private static final String ERROR_LOGIN_CREDENTIALS = "账号或密码错误";
     private static final String ERROR_ACCOUNT_DISABLED = "账户停用";
@@ -79,7 +81,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     /** 默认账号密码 */
     private static final String DEFAULT_USERNAME = "admin_user";
     private static final String DEFAULT_PASSWORD = "admin_user";
-    
+
     /** 登录响应字段名 */
     private static final String LOGIN_TOKEN_FIELD = "token";
     private static final String LOGIN_NAME_FIELD = "name";
@@ -87,21 +89,21 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     private static final String LOGIN_REQUIRE_PASSWORD_CHANGE_FIELD = "requirePasswordChange";
 
     // ========== 依赖注入 ==========
-    
+
     @Resource
     private UserMapper userMapper;
-    
+
     @Resource
     @Lazy
     private ForwardMapper forwardMapper;
-    
+
     @Resource
     private UserTunnelMapper userTunnelMapper;
-    
+
     @Resource
     @Lazy
     private TunnelService tunnelService;
-    
+
     @Resource
     @Lazy
     private NodeService nodeService;
@@ -123,12 +125,18 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     /**
      * 用户登录
      * 验证验证码、用户名密码，检查账户状态，生成JWT令牌
-     * 
+     *
      * @param loginDto 登录数据传输对象
      * @return 登录结果响应，包含令牌和用户信息
      */
     @Override
     public R login(LoginDto loginDto) {
+
+        // 0. Cloudflare Turnstile（开关开启且两项密钥完整时生效）
+        String remoteIp = IpUtils.getIpAddr(HttpContextUtils.getHttpServletRequest());
+        if (!viteConfigService.verifyTurnstile(loginDto.getTurnstileToken(), remoteIp)) {
+            return R.err("人机验证失败，请重试");
+        }
 
         // 1. 验证验证码
         ViteConfig viteConfig = viteConfigService.getOne(new QueryWrapper<ViteConfig>().eq("name", "captcha_enabled"));
@@ -149,10 +157,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         // 3. 生成令牌并返回用户信息
         User user = validationResult.getUser();
         String token = JwtUtil.generateToken(user);
-        
+
         // 4. 检查是否使用默认账号密码
         boolean requirePasswordChange = isDefaultCredentials(loginDto.getUsername(), loginDto.getPassword());
-        
+
         return R.ok(MapUtil.builder()
                 .put(LOGIN_TOKEN_FIELD, token)
                 .put(LOGIN_NAME_FIELD, user.getUser())
@@ -164,7 +172,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     /**
      * 创建用户
      * 检查用户名唯一性，设置默认属性，加密密码
-     * 
+     *
      * @param userDto 用户创建数据传输对象
      * @return 创建结果响应
      */
@@ -179,7 +187,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         // 2. 构建用户实体并保存
         User user = buildNewUserEntity(userDto);
         boolean result = this.save(user);
-        
+
         if (result) {
             // 3. 添加到期时间延时任务
             return R.ok(SUCCESS_CREATE_MSG);
@@ -202,7 +210,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     /**
      * 更新用户信息
      * 验证用户存在性和用户名唯一性，处理密码加密
-     * 
+     *
      * @param userUpdateDto 用户更新数据传输对象
      * @return 更新结果响应
      */
@@ -228,7 +236,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         // 4. 构建更新实体并保存
         User updateUser = buildUpdateUserEntity(userUpdateDto);
         boolean result = this.updateById(updateUser);
-        
+
         if (result) {
             // 5. 处理到期时间延时任务
             return R.ok(SUCCESS_UPDATE_MSG);
@@ -240,7 +248,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     /**
      * 删除用户
      * 级联删除用户相关的所有数据，包括转发、Gost服务和隧道权限
-     * 
+     *
      * @param id 用户ID
      * @return 删除结果响应
      */
@@ -259,7 +267,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             // 3. 删除用户
             boolean result = this.removeById(id);
             return result ? R.ok(SUCCESS_DELETE_MSG) : R.err(ERROR_DELETE_FAILED);
-            
+
         } catch (Exception e) {
             e.printStackTrace();
             return R.err("删除用户时发生错误：" + e.getMessage());
@@ -269,7 +277,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     /**
      * 获取用户套餐信息
      * 包括用户基本信息、隧道权限详情和转发详情
-     * 
+     *
      * @return 用户套餐信息响应
      */
     @Override
@@ -283,7 +291,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
             // 2. 构建套餐信息
             UserPackageDto packageDto = buildUserPackageDto(currentUser);
-            
+
             return R.ok(packageDto);
         } catch (Exception e) {
             e.printStackTrace();
@@ -294,7 +302,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     /**
      * 修改账号密码
      * 验证当前密码、新密码确认、用户名唯一性、更新用户账号密码
-     * 
+     *
      * @param changePasswordDto 修改账号密码数据传输对象
      * @return 修改结果响应
      */
@@ -333,10 +341,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             updateUser.setUser(changePasswordDto.getNewUsername());
             updateUser.setPwd(Md5Util.md5(changePasswordDto.getNewPassword()));
             updateUser.setUpdatedTime(System.currentTimeMillis());
-            
+
             boolean result = this.updateById(updateUser);
             return result ? R.ok("账号密码修改成功") : R.err(ERROR_UPDATE_FAILED);
-            
+
         } catch (Exception e) {
             e.printStackTrace();
             return R.err("修改账号密码时发生错误：" + e.getMessage());
@@ -366,7 +374,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     /**
      * 验证用户登录凭据
-     * 
+     *
      * @param loginDto 登录数据传输对象
      * @return 登录验证结果
      */
@@ -375,21 +383,21 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         if (user == null) {
             return LoginValidationResult.error(ERROR_LOGIN_CREDENTIALS);
         }
-        
+
         if (!user.getPwd().equals(Md5Util.md5(loginDto.getPassword()))) {
             return LoginValidationResult.error(ERROR_LOGIN_CREDENTIALS);
         }
-        
+
         if (user.getStatus() == USER_STATUS_DISABLED) {
             return LoginValidationResult.error(ERROR_ACCOUNT_DISABLED);
         }
-        
+
         return LoginValidationResult.success(user);
     }
 
     /**
      * 检查是否使用默认账号密码
-     * 
+     *
      * @param username 用户名
      * @param password 密码
      * @return 是否是默认凭据
@@ -400,7 +408,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     /**
      * 验证用户名唯一性
-     * 
+     *
      * @param username 用户名
      * @param excludeUserId 排除的用户ID（用于更新时排除自己）
      * @return 验证结果响应
@@ -410,38 +418,38 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         if (excludeUserId != null) {
             queryWrapper.ne("id", excludeUserId);
         }
-        
+
         User existUser = this.getOne(queryWrapper);
         if (existUser != null) {
             String errorMsg = excludeUserId != null ? ERROR_USERNAME_TAKEN : ERROR_USERNAME_EXISTS;
             return R.err(errorMsg);
         }
-        
+
         return R.ok();
     }
 
     /**
      * 构建新用户实体对象
-     * 
+     *
      * @param userDto 用户创建DTO
      * @return 构建完成的用户对象
      */
     private User buildNewUserEntity(UserDto userDto) {
         User user = new User();
         BeanUtils.copyProperties(userDto, user);
-        
+
         // 设置加密密码
         user.setPwd(Md5Util.md5(userDto.getPwd()));
-        
+
         // 设置默认属性
         user.setStatus(userDto.getStatus() != null ? userDto.getStatus() : USER_STATUS_ACTIVE);
         user.setRoleId(USER_ROLE_ID);
-        
+
         // 设置时间戳
         long currentTime = System.currentTimeMillis();
         user.setCreatedTime(currentTime);
         user.setUpdatedTime(currentTime);
-        
+
         return user;
     }
 
@@ -449,7 +457,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     /**
      * 检查用户是否存在
-     * 
+     *
      * @param userId 用户ID
      * @return 用户是否存在
      */
@@ -459,30 +467,30 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     /**
      * 构建用户更新实体对象
-     * 
+     *
      * @param userUpdateDto 用户更新DTO
      * @return 构建完成的更新对象
      */
     private User buildUpdateUserEntity(UserUpdateDto userUpdateDto) {
         User user = new User();
         BeanUtils.copyProperties(userUpdateDto, user);
-        
+
         // 处理密码更新
         if (StrUtil.isNotBlank(userUpdateDto.getPwd())) {
             user.setPwd(Md5Util.md5(userUpdateDto.getPwd()));
         } else {
             user.setPwd(null); // 不更新密码字段
         }
-        
+
         // 设置更新时间
         user.setUpdatedTime(System.currentTimeMillis());
-        
+
         return user;
     }
 
     /**
      * 验证用户删除条件
-     * 
+     *
      * @param userId 用户ID
      * @return 验证结果响应
      */
@@ -501,7 +509,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     /**
      * 验证用户更新条件
-     * 
+     *
      * @param userId 用户ID
      * @return 验证结果响应
      */
@@ -520,27 +528,27 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     /**
      * 删除用户相关的所有数据
-     * 
+     *
      * @param userId 用户ID
      */
     private void deleteUserRelatedData(Long userId) {
         // 1. 删除用户的所有转发和对应的Gost服务
         deleteUserForwardsAndGostServices(userId);
-        
+
         // 2. 删除用户隧道权限
         deleteUserTunnelPermissions(userId);
     }
 
     /**
      * 删除用户转发和对应的Gost服务
-     * 
+     *
      * @param userId 用户ID
      */
     private void deleteUserForwardsAndGostServices(Long userId) {
         QueryWrapper<Forward> forwardQuery = new QueryWrapper<>();
         forwardQuery.eq("user_id", userId);
         List<Forward> userForwards = forwardMapper.selectList(forwardQuery);
-        
+
         for (Forward forward : userForwards) {
             try {
                 // 删除Gost服务
@@ -549,7 +557,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
                 // 记录错误但继续删除，避免因为Gost服务删除失败而阻断用户删除
                 System.err.println("删除用户转发对应的Gost服务失败，转发ID: " + forward.getId() + ", 错误: " + e.getMessage());
             }
-            
+
             // 删除数据库中的转发记录
             forwardMapper.deleteById(forward.getId());
         }
@@ -557,7 +565,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     /**
      * 删除转发对应的Gost服务
-     * 
+     *
      * @param forward 转发对象
      * @param userId 用户ID
      */
@@ -585,7 +593,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     /**
      * 删除隧道转发相关的Gost服务
-     * 
+     *
      * @param tunnel 隧道对象
      * @param serviceName 服务名称
      * @param inNode 入口节点
@@ -600,7 +608,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     /**
      * 获取用户隧道关系
-     * 
+     *
      * @param userId 用户ID
      * @param tunnelId 隧道ID
      * @return 用户隧道关系对象
@@ -613,7 +621,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     /**
      * 构建服务名称
-     * 
+     *
      * @param forwardId 转发ID
      * @param userId 用户ID
      * @param userTunnelId 用户隧道ID
@@ -626,7 +634,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     /**
      * 删除用户隧道权限
-     * 
+     *
      * @param userId 用户ID
      */
     private void deleteUserTunnelPermissions(Long userId) {
@@ -637,60 +645,60 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     /**
      * 获取当前用户信息
-     * 
+     *
      * @return 当前用户信息结果
      */
     private CurrentUserInfo getCurrentUserInfo() {
         Integer userId = JwtUtil.getUserIdFromToken();
         Integer roleId = JwtUtil.getRoleIdFromToken();
-        
+
         if (userId == null) {
             return CurrentUserInfo.error(ERROR_USER_NOT_LOGGED_IN);
         }
-        
+
         User user = this.getById(userId);
         if (user == null) {
             return CurrentUserInfo.error(ERROR_USER_NOT_FOUND);
         }
-        
+
         return CurrentUserInfo.success(user, roleId);
     }
 
     /**
      * 构建用户套餐信息DTO
-     * 
+     *
      * @param currentUser 当前用户信息
      * @return 用户套餐信息DTO
      */
     private UserPackageDto buildUserPackageDto(CurrentUserInfo currentUser) {
         User user = currentUser.getUser();
         Integer roleId = currentUser.getRoleId();
-        
+
         // 1. 构造用户基本信息
         UserPackageDto.UserInfoDto userInfo = buildUserInfoDto(user);
-        
+
         // 2. 获取隧道权限详情
         List<UserPackageDto.UserTunnelDetailDto> tunnelPermissions = getTunnelPermissions(user.getId());
-        
+
         // 3. 获取转发详情
         List<UserPackageDto.UserForwardDetailDto> forwards = userMapper.getUserForwardDetails(user.getId().intValue());
 
         // 4. 查询最近24小时流量信息，没有的补0
         List<StatisticsFlow> statisticsFlows = getLast24HoursFlowStatistics(user.getId());
-        
+
         // 5. 构造返回结果
         UserPackageDto packageDto = new UserPackageDto();
         packageDto.setUserInfo(userInfo);
         packageDto.setTunnelPermissions(tunnelPermissions);
         packageDto.setForwards(forwards);
         packageDto.setStatisticsFlows(statisticsFlows);
-        
+
         return packageDto;
     }
 
     /**
      * 构建用户基本信息DTO
-     * 
+     *
      * @param user 用户对象
      * @return 用户基本信息DTO
      */
@@ -712,7 +720,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     /**
      * 获取隧道权限详情
-     * 
+     *
      * @param userId 用户ID
      * @return 隧道权限详情列表
      */
@@ -722,7 +730,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     /**
      * 获取用户最近24小时的流量统计数据，没有数据的时间点补0
-     * 
+     *
      * @param userId 用户ID
      * @return 最近24小时流量统计列表
      */

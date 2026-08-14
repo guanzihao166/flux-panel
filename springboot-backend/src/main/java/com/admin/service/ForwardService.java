@@ -4,6 +4,7 @@ import com.admin.common.dto.ForwardDto;
 import com.admin.common.dto.ForwardUpdateDto;
 import com.admin.common.lang.R;
 import com.admin.entity.Forward;
+import com.admin.entity.Tunnel;
 import com.baomidou.mybatisplus.extension.service.IService;
 import java.util.Map;
 
@@ -73,6 +74,10 @@ public interface ForwardService extends IService<Forward> {
      */
     R diagnoseForward(Long id);
 
+    R probeForward(Long id);
+
+    R probeAllForwards();
+
     /**
      * 更新转发排序
      * @param params 包含forwards数组的参数
@@ -82,4 +87,6 @@ public interface ForwardService extends IService<Forward> {
 
 
     void updateForwardA(Forward forward);
+
+    R rebuildForwardRoute(Forward forward, Tunnel oldTunnel, Tunnel newTunnel);
 }

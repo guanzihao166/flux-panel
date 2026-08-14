@@ -8,11 +8,11 @@ interface PageWrapperProps {
   className?: string;
 }
 
-export default function PageWrapper({ 
-  children, 
-  title, 
-  description, 
-  className = "container mx-auto max-w-7xl px-3 lg:px-6 py-8" 
+export default function PageWrapper({
+  children,
+  title,
+  description,
+  className = "container mx-auto max-w-7xl px-3 lg:px-6 py-8"
 }: PageWrapperProps) {
   const [isReady, setIsReady] = useState(false);
 
@@ -53,4 +53,4 @@ export default function PageWrapper({
       </div>
     </AdminLayout>
   );
-} 
+}

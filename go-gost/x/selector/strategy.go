@@ -10,9 +10,9 @@ import (
 
 	"github.com/go-gost/core/logger"
 	"github.com/go-gost/core/metadata"
-	mdutil "github.com/go-gost/x/metadata/util"
 	"github.com/go-gost/core/selector"
 	ctxvalue "github.com/go-gost/x/ctx"
+	mdutil "github.com/go-gost/x/metadata/util"
 )
 
 type roundRobinStrategy[T any] struct {
@@ -68,6 +68,44 @@ func (s *randomStrategy[T]) Apply(ctx context.Context, vs ...T) (v T) {
 	}
 
 	return s.rw.Next()
+}
+
+type smoothWeightedRoundRobinStrategy[T any] struct {
+	mu      sync.Mutex
+	current []int
+}
+
+// SmoothWeightedRoundRobinStrategy distributes selections proportionally to
+// metadata.weight without the traffic bursts caused by weighted random.
+func SmoothWeightedRoundRobinStrategy[T any]() selector.Strategy[T] {
+	return &smoothWeightedRoundRobinStrategy[T]{}
+}
+
+func (s *smoothWeightedRoundRobinStrategy[T]) Apply(ctx context.Context, vs ...T) (v T) {
+	if len(vs) == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.current) != len(vs) {
+		s.current = make([]int, len(vs))
+	}
+	total, selected := 0, 0
+	for i := range vs {
+		weight := 1
+		if md, _ := any(vs[i]).(metadata.Metadatable); md != nil {
+			if configured := mdutil.GetInt(md.Metadata(), labelWeight); configured > 0 {
+				weight = configured
+			}
+		}
+		total += weight
+		s.current[i] += weight
+		if s.current[i] > s.current[selected] {
+			selected = i
+		}
+	}
+	s.current[selected] -= total
+	return vs[selected]
 }
 
 type fifoStrategy[T any] struct{}

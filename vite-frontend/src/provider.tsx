@@ -25,7 +25,7 @@ export function Provider({ children }: ProvidersProps) {
       <HeroUIProvider navigate={navigate} useHref={useHref}>
         <ThemeProvider>
           {children}
-          <Toaster 
+          <Toaster
             position="top-center"
             toastOptions={{
               duration: 2000,

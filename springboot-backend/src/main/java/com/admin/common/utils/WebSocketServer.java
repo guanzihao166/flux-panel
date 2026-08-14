@@ -33,16 +33,16 @@ public class WebSocketServer extends TextWebSocketHandler {
 
     // 存储所有活跃的 WebSocket 连接（
     private static final CopyOnWriteArraySet<WebSocketSession> activeSessions = new CopyOnWriteArraySet<>();
-    
+
     // 存储节点ID和对应的WebSocket session映射
     private static final ConcurrentHashMap<Long, WebSocketSession> nodeSessions = new ConcurrentHashMap<>();
-    
+
     // 为每个session提供锁对象，防止并发发送消息
     private static final ConcurrentHashMap<String, Object> sessionLocks = new ConcurrentHashMap<>();
-    
+
     // 存储等待响应的请求，key为requestId，value为CompletableFuture
     private static final ConcurrentHashMap<String, CompletableFuture<GostDto>> pendingRequests = new ConcurrentHashMap<>();
-    
+
     // 缓存加密器实例，避免重复创建
     private static final ConcurrentHashMap<String, AESCrypto> cryptoCache = new ConcurrentHashMap<>();
 
@@ -68,7 +68,7 @@ public class WebSocketServer extends TextWebSocketHandler {
     public void handleTextMessage(WebSocketSession session, TextMessage message) {
         try {
             if (StringUtils.isNoneBlank(message.getPayload())) {
-                
+
                 String id = session.getAttributes().get("id").toString();
                 String type = session.getAttributes().get("type").toString();
                 String nodeSecret = (String) session.getAttributes().get("nodeSecret");
@@ -88,13 +88,13 @@ public class WebSocketServer extends TextWebSocketHandler {
                         String responseMessage = responseJson.getString("message");
                         String responseType = responseJson.getString("type");
                         JSONObject responseData = responseJson.getJSONObject("data");
-                        
+
                         if (requestId != null) {
                             CompletableFuture<GostDto> future = pendingRequests.remove(requestId);
 
                             if (future != null) {
                                 GostDto result = new GostDto();
-                                
+
                                 // 根据响应类型处理不同的数据
                                 if ("PingResponse".equals(responseType) && responseData != null) {
                                     // 特殊处理ping响应，将完整的响应数据返回
@@ -107,7 +107,7 @@ public class WebSocketServer extends TextWebSocketHandler {
                                         result.setData(responseData);
                                     }
                                 }
-                                
+
                                 future.complete(result);
                             }
                         }
@@ -125,7 +125,7 @@ public class WebSocketServer extends TextWebSocketHandler {
                     jsonObject.put("type", "info");
                     jsonObject.put("data", decryptedPayload);
                     String broadcastMessage = jsonObject.toJSONString();
-                    
+
                     // 异步处理广播消息，避免阻塞当前线程
                     for (WebSocketSession targetSession : activeSessions) {
                         if (targetSession != null && targetSession.isOpen() && !targetSession.equals(session)) {
@@ -150,7 +150,7 @@ public class WebSocketServer extends TextWebSocketHandler {
         try {
             // 尝试解析为加密消息格式
             EncryptedMessage encryptedMessage = JSON.parseObject(payload, EncryptedMessage.class);
-            
+
             if (encryptedMessage.isEncrypted() && encryptedMessage.getData() != null) {
                 // 获取或创建加密器
                 AESCrypto crypto = getOrCreateCrypto(nodeSecret);
@@ -158,7 +158,7 @@ public class WebSocketServer extends TextWebSocketHandler {
                     log.info("⚠️ 收到加密消息但无法创建解密器，使用原始数据");
                     return payload;
                 }
-                
+
                 // 解密数据
                 String decryptedData = crypto.decryptString(encryptedMessage.getData());
                 return decryptedData;
@@ -167,7 +167,7 @@ public class WebSocketServer extends TextWebSocketHandler {
             // 解析失败，可能是非加密格式，直接返回原始数据
             log.info("WebSocket消息未加密或解密失败，使用原始数据: {}", e.getMessage());
         }
-        
+
         return payload;
     }
 
@@ -183,13 +183,13 @@ public class WebSocketServer extends TextWebSocketHandler {
             AESCrypto crypto = getOrCreateCrypto(nodeSecret);
             if (crypto != null) {
                 String encryptedData = crypto.encrypt(message);
-                
+
                 // 创建加密消息包装器
                 JSONObject encryptedMessage = new JSONObject();
                 encryptedMessage.put("encrypted", true);
                 encryptedMessage.put("data", encryptedData);
                 encryptedMessage.put("timestamp", System.currentTimeMillis());
-                
+
                 return encryptedMessage.toJSONString();
             }
         } catch (Exception e) {
@@ -215,7 +215,7 @@ public class WebSocketServer extends TextWebSocketHandler {
         try {
             String id = session.getAttributes().get("id").toString();
             String type = session.getAttributes().get("type").toString();
-            
+
             if (!Objects.equals(type, "1")) {
                 // 网页管理员连接
                 activeSessions.add(session);
@@ -227,9 +227,9 @@ public class WebSocketServer extends TextWebSocketHandler {
                 String http = (String) session.getAttributes().get("http");
                 String tls = (String) session.getAttributes().get("tls");
                 String socks = (String) session.getAttributes().get("socks");
-                
+
                 log.info("节点 {} 尝试连接，开始处理连接逻辑", nodeId);
-                
+
                 // 检查是否已有该节点的连接，如果有则记录日志但直接覆盖
                 WebSocketSession existingSession = nodeSessions.get(nodeId);
                 if (existingSession != null && existingSession.isOpen()) {
@@ -237,10 +237,10 @@ public class WebSocketServer extends TextWebSocketHandler {
                     // 清理旧连接的锁对象
                     sessionLocks.remove(existingSession.getId());
                 }
-                
+
                 // 直接覆盖会话映射（不主动关闭旧连接，让它自然断开）
                 nodeSessions.put(nodeId, session);
-                
+
                 // 如果有旧连接，在覆盖映射后主动关闭它
                 if (existingSession != null && existingSession.isOpen()) {
                     try {
@@ -250,7 +250,7 @@ public class WebSocketServer extends TextWebSocketHandler {
                         log.info("关闭节点 {} 旧连接失败: {}", nodeId, e.getMessage());
                     }
                 }
-                
+
                 // 更新节点状态为在线
                 Node node = nodeService.getById(nodeId);
                 if (node != null) {
@@ -270,10 +270,10 @@ public class WebSocketServer extends TextWebSocketHandler {
                     }
 
                     boolean updateResult = nodeService.updateById(node);
-                    
+
                     if (updateResult) {
                         log.info("节点 {} 连接建立成功，状态更新为在线，版本: {}", nodeId, version);
-                        
+
                         // 广播节点上线状态给所有管理员
                         JSONObject res = new JSONObject();
                         res.put("id", id);
@@ -314,9 +314,9 @@ public class WebSocketServer extends TextWebSocketHandler {
             String id = session.getAttributes().get("id").toString();
             String type = session.getAttributes().get("type").toString();
             String sessionId = session.getId();
-            
+
             log.info("连接关闭，ID: {}, 类型: {}, 状态: {}", id, type, status);
-            
+
             if (!Objects.equals(type, "1")) {
                 // 管理员连接关闭
                 boolean removed = activeSessions.remove(session);
@@ -324,7 +324,7 @@ public class WebSocketServer extends TextWebSocketHandler {
             } else {
                 // 客户端节点连接关闭
                 Long nodeId = Long.valueOf(id);
-                
+
                 // 验证当前会话是否还是活跃会话（关键：这里会自动过滤掉被覆盖的旧连接）
                 WebSocketSession currentSession = nodeSessions.get(nodeId);
                 if (currentSession == null || !currentSession.equals(session)) {
@@ -332,20 +332,20 @@ public class WebSocketServer extends TextWebSocketHandler {
                     sessionLocks.remove(sessionId);
                     return;
                 }
-                
+
                 log.info("节点 {} 当前活跃连接关闭，开始验证并更新状态", nodeId);
-                
+
                     nodeSessions.remove(nodeId);
-                    
+
                     // 更新节点状态为离线
                     Node node = nodeService.getById(nodeId);
                     if (node != null) {
                         node.setStatus(0);
                         boolean updateResult = nodeService.updateById(node);
-                        
+
                         if (updateResult) {
                             log.info("节点 {} 状态更新为离线成功", nodeId);
-                            
+
                             JSONObject res = new JSONObject();
                             res.put("id", id);
                             res.put("type", "status");
@@ -358,7 +358,7 @@ public class WebSocketServer extends TextWebSocketHandler {
                         log.info("节点 {} 不存在，无法更新离线状态", nodeId);
                     }
             }
-            
+
             // 清理session锁对象
             sessionLocks.remove(sessionId);
 
@@ -379,7 +379,7 @@ public class WebSocketServer extends TextWebSocketHandler {
         if (socketSession != null && socketSession.isOpen()) {
             String sessionId = socketSession.getId();
             Object lock = sessionLocks.computeIfAbsent(sessionId, k -> new Object());
-            
+
             synchronized (lock) {
                 try {
                     if (socketSession.isOpen()) {
@@ -402,20 +402,20 @@ public class WebSocketServer extends TextWebSocketHandler {
             cleanupSession(socketSession);
         }
     }
-    
+
     /**
      * 清理失效的session，自动识别是节点session还是管理员session
      */
     private static void cleanupSession(WebSocketSession session) {
         if (session == null) return;
-        
+
         String sessionId = session.getId();
-        
+
         // 清理session锁
         sessionLocks.remove(sessionId);
-        
+
         boolean removedFromAdmin = activeSessions.remove(session);
-        
+
         if (!removedFromAdmin) {
             nodeSessions.entrySet().removeIf(entry -> {
                 if (entry.getValue() == session) {
@@ -456,11 +456,11 @@ public class WebSocketServer extends TextWebSocketHandler {
 
         // 生成唯一的请求ID
         String requestId = UUID.randomUUID().toString();
-        
+
         // 创建CompletableFuture用于等待响应
         CompletableFuture<GostDto> future = new CompletableFuture<>();
         pendingRequests.put(requestId, future);
-        
+
         // 获取节点密钥用于加密
         String nodeSecret = (String) nodeSession.getAttributes().get("nodeSecret");
 
@@ -471,10 +471,10 @@ public class WebSocketServer extends TextWebSocketHandler {
             data.put("requestId", requestId);
             sendToUser(nodeSession, data.toJSONString(), nodeSecret);
             GostDto result = future.get(10, TimeUnit.SECONDS);
-            
+
             log.info("成功发送消息到节点 {} 并收到响应: {}", node_id, result.getMsg());
             return result;
-            
+
         } catch (Exception e) {
             // 清理请求和映射关系
             pendingRequests.remove(requestId);
@@ -491,5 +491,5 @@ public class WebSocketServer extends TextWebSocketHandler {
         }
     }
 
-    
+
 }
