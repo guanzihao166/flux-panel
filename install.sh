@@ -185,7 +185,7 @@ install_gost() {
   echo "✅ 下载完成"
 
   # 打印版本
-  echo "🔎 gost 版本：$($INSTALL_DIR/gost -V)"
+  echo "🔎 gost 版本：$(cd "$INSTALL_DIR" && "$INSTALL_DIR/gost" -V)"
 
   # 写入 config.json (安装时总是创建新的)
   CONFIG_FILE="$INSTALL_DIR/config.json"
@@ -277,7 +277,7 @@ update_gost() {
   chmod +x "$INSTALL_DIR/gost"
   
   # 打印版本
-  echo "🔎 新版本：$($INSTALL_DIR/gost -V)"
+  echo "🔎 新版本：$(cd "$INSTALL_DIR" && "$INSTALL_DIR/gost" -V)"
 
   # 重启服务
   echo "🔄 重启服务..."
