@@ -507,6 +507,10 @@ public class WebSocketServer extends TextWebSocketHandler {
             stats.tcpConnections.set(obj.getLongValue("tcpConnections"));
             stats.udpConnections.set(obj.getLongValue("udpConnections"));
 
+            if (nodeId == 6L) {
+                log.info("节点 6 统计: tcp={} udp={} connectionStats={}", stats.tcpConnections.get(), stats.udpConnections.get(), obj.getJSONArray("connectionStats"));
+            }
+
             Map<String, List<ConnectionStatDto>> byService = new ConcurrentHashMap<>();
             JSONArray connections = obj.getJSONArray("connectionStats");
             if (connections != null) {
