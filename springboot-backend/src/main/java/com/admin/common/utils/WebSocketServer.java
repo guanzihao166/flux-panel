@@ -240,25 +240,11 @@ public class WebSocketServer extends TextWebSocketHandler {
 
                 log.info("节点 {} 尝试连接，开始处理连接逻辑", nodeId);
 
-                // 检查是否已有该节点的连接，如果有则记录日志但直接覆盖
-                WebSocketSession existingSession = nodeSessions.get(nodeId);
+                // 检查是否已有该节点的连接，如果有则直接覆盖映射，不主动关闭旧连接。
+                // 主动关闭会让旧连接立即重连，残留进程存在时形成无限重连循环。
+                WebSocketSession existingSession = nodeSessions.put(nodeId, session);
                 if (existingSession != null && existingSession.isOpen()) {
                     log.info("节点 {} 已有连接存在: {}，新连接将覆盖旧连接", nodeId, existingSession.getId());
-                    // 清理旧连接的锁对象
-                    sessionLocks.remove(existingSession.getId());
-                }
-
-                // 直接覆盖会话映射（不主动关闭旧连接，让它自然断开）
-                nodeSessions.put(nodeId, session);
-
-                // 如果有旧连接，在覆盖映射后主动关闭它
-                if (existingSession != null && existingSession.isOpen()) {
-                    try {
-                        log.info("主动关闭节点 {} 的旧连接: {}", nodeId, existingSession.getId());
-                        existingSession.close();
-                    } catch (Exception e) {
-                        log.info("关闭节点 {} 旧连接失败: {}", nodeId, e.getMessage());
-                    }
                 }
 
                 // 更新节点状态为在线
