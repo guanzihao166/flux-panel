@@ -250,7 +250,8 @@ public class WebSocketServer extends TextWebSocketHandler {
                 // 停止服务并删除 systemd、配置目录和二进制，再关闭旧会话。
                 Object takeoverLock = nodeTakeoverLocks.computeIfAbsent(nodeId, k -> new Object());
                 synchronized (takeoverLock) {
-                    WebSocketSession existingSession = nodeSessions.get(nodeId);
+                    // 先登记新会话，旧实例收到删除命令并断开时就不会把节点误标为离线。
+                    WebSocketSession existingSession = nodeSessions.put(nodeId, session);
                     if (existingSession != null && existingSession.isOpen() && !existingSession.equals(session)) {
                         String existingInstanceId = (String) existingSession.getAttributes().get("instanceId");
                         String newInstanceId = (String) session.getAttributes().get("instanceId");
@@ -276,7 +277,6 @@ public class WebSocketServer extends TextWebSocketHandler {
                             log.warn("节点 {} 关闭旧会话失败: {}", nodeId, e.getMessage());
                         }
                     }
-                    nodeSessions.put(nodeId, session);
                 }
 
                 // 更新节点状态为在线

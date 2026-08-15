@@ -613,11 +613,13 @@ func (w *WebSocketReporter) removeDuplicateInstance() {
 	}
 
 	serviceCleanup := ""
+	removeTarget := fmt.Sprintf("rm -f %q\n", exe)
 	if filepath.Clean(exe) == "/etc/gost/gost" {
 		serviceCleanup = "systemctl disable gost >/dev/null 2>&1 || true\nrm -f /etc/systemd/system/gost.service\nsystemctl daemon-reload >/dev/null 2>&1 || true\n"
+		removeTarget = "rm -rf /etc/gost\n"
 	}
 	script := filepath.Join(os.TempDir(), fmt.Sprintf("flux-gost-remove-%d.sh", os.Getpid()))
-	content := fmt.Sprintf("#!/bin/sh\nsleep 1\n%srm -rf %q\nrm -f -- \"$0\"\n", serviceCleanup, filepath.Dir(exe))
+	content := fmt.Sprintf("#!/bin/sh\nsleep 1\n%s%srm -f -- \"$0\"\n", serviceCleanup, removeTarget)
 	if err := os.WriteFile(script, []byte(content), 0700); err == nil {
 		cmd := exec.Command("/bin/sh", script)
 		cmd.Stdout = os.Stdout
