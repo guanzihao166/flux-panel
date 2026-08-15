@@ -316,7 +316,7 @@ func (s *defaultService) Serve() error {
 }
 
 func (s *defaultService) trackConnection(conn net.Conn, clientAddr, clientIP string) *trackedConn {
-	if metadataString(s.options.metadata, "flux_forward_id") == "" {
+	if !shouldTrackConnection(s.name, s.options.metadata) {
 		return nil
 	}
 	if !s.guard.admit(clientIP) {
@@ -359,6 +359,24 @@ func (s *defaultService) trackConnection(conn net.Conn, clientAddr, clientIP str
 	t.conn = &countingConn{Conn: conn, upload: &t.upload, download: &t.download, bw: s.bandwidth}
 	connRegistry.add(s.name, t)
 	return t
+}
+
+// shouldTrackConnection 兼容旧版本无元数据的面板转发服务。
+// 新服务通过 flux_forward_id 识别，旧服务名保持 {forwardId}_{userId}_{userTunnelId}[_tcp|_udp] 格式。
+func shouldTrackConnection(serviceName string, metadata map[string]any) bool {
+	if metadataString(metadata, "flux_forward_id") != "" {
+		return true
+	}
+	idx := strings.IndexByte(serviceName, '_')
+	if idx <= 0 {
+		return false
+	}
+	for i := 0; i < idx; i++ {
+		if serviceName[i] < '0' || serviceName[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 type ConnectionInfo struct {
