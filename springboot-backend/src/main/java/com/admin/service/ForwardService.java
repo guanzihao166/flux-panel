@@ -54,6 +54,14 @@ public interface ForwardService extends IService<Forward> {
     R forceDeleteForward(Long id);
 
     /**
+     * 节点级联删除端口转发
+     * 尽力清理GOST服务后删除数据库记录，不因节点离线而中断
+     * @param forward 转发对象
+     * @return 结果
+     */
+    R cascadeDeleteForward(Forward forward);
+
+    /**
      * 暂停转发服务
      * @param id 转发ID
      * @return 结果

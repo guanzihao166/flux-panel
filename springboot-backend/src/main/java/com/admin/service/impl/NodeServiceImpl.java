@@ -24,8 +24,11 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 import org.springframework.beans.factory.annotation.Value;
 
@@ -194,15 +197,14 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
             return R.err(ERROR_NODE_NOT_FOUND);
         }
 
-        // 2. 检查节点使用情况
-        R usageCheckResult = checkNodeUsage(id);
-        if (usageCheckResult.getCode() != 0) {
-            return usageCheckResult;
+        // 2. 级联删除关联隧道、转发和用户隧道权限
+        for (Long tunnelId : findRelatedTunnelIds(id)) {
+            tunnelService.deleteTunnelCascade(tunnelId);
         }
 
         // 3. 执行删除操作
         boolean result = this.removeById(id);
-        return result ? R.ok(SUCCESS_DELETE_MSG) : R.err(ERROR_DELETE_MSG);
+        return result ? R.ok("节点及关联隧道、转发已删除") : R.err(ERROR_DELETE_MSG);
     }
 
     /**
@@ -219,6 +221,35 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
             throw new RuntimeException(ERROR_NODE_NOT_FOUND);
         }
         return node;
+    }
+
+    private List<Long> findRelatedTunnelIds(Long nodeId) {
+        Set<Long> tunnelIds = new LinkedHashSet<>();
+        for (Tunnel tunnel : tunnelService.list()) {
+            if (Objects.equals(tunnel.getInNodeId(), nodeId)
+                    || Objects.equals(tunnel.getOutNodeId(), nodeId)
+                    || containsNodeId(tunnel.getOutNodeIds(), nodeId)
+                    || containsNodeId(tunnel.getChainNodeIds(), nodeId)) {
+                tunnelIds.add(tunnel.getId());
+            }
+        }
+        return new ArrayList<>(tunnelIds);
+    }
+
+    private boolean containsNodeId(String csvNodeIds, Long nodeId) {
+        if (StrUtil.isBlank(csvNodeIds) || nodeId == null) {
+            return false;
+        }
+        for (String value : csvNodeIds.split(",")) {
+            try {
+                if (Long.parseLong(value.trim()) == nodeId) {
+                    return true;
+                }
+            } catch (NumberFormatException ignored) {
+                // 忽略脏数据，继续解析其他节点ID
+            }
+        }
+        return false;
     }
 
     // ========== 私有辅助方法 ==========

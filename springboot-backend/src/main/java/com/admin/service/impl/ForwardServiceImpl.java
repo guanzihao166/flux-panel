@@ -335,6 +335,32 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         }
     }
 
+    @Override
+    public R cascadeDeleteForward(Forward forward) {
+        if (forward == null || forward.getId() == null) {
+            return R.ok();
+        }
+        try {
+            Tunnel tunnel = tunnelService.getById(forward.getTunnelId());
+            if (tunnel != null) {
+                NodeInfo nodeInfo = getRequiredNodes(tunnel);
+                if (!nodeInfo.isHasError()) {
+                    UserTunnel userTunnel = getUserTunnel(forward.getUserId(), tunnel.getId().intValue());
+                    R gostResult = deleteGostServices(forward, tunnel, nodeInfo, userTunnel);
+                    if (gostResult.getCode() != 0) {
+                        log.warn("节点级联删除转发 {} 时 GOST 清理未完成: {}", forward.getId(), gostResult.getMsg());
+                    }
+                } else {
+                    log.warn("节点级联删除转发 {} 跳过 GOST 清理: {}", forward.getId(), nodeInfo.getErrorMessage());
+                }
+            }
+        } catch (Exception e) {
+            log.warn("节点级联删除转发 {} 时 GOST 清理失败: {}", forward.getId(), e.getMessage());
+        }
+        this.removeById(forward.getId());
+        return R.ok();
+    }
+
     /**
      * 改变转发状态（暂停/恢复）
      */

@@ -272,6 +272,29 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         return result ? R.ok(SUCCESS_DELETE_MSG) : R.err(ERROR_DELETE_MSG);
     }
 
+    @Override
+    public R deleteTunnelCascade(Long tunnelId) {
+        if (!isTunnelExists(tunnelId)) {
+            return R.ok();
+        }
+
+        Set<Long> forwardIds = new LinkedHashSet<>();
+        for (Forward forward : forwardService.list()) {
+            boolean primaryRef = forward.getTunnelId() != null && forward.getTunnelId().longValue() == tunnelId;
+            boolean endpointRef = containsTunnelId(forward.getTunnelIds(), tunnelId);
+            if (primaryRef || endpointRef) {
+                forwardIds.add(forward.getId().longValue());
+            }
+        }
+        for (Long forwardId : forwardIds) {
+            forwardService.cascadeDeleteForward(forwardService.getById(forwardId));
+        }
+
+        userTunnelService.remove(new QueryWrapper<UserTunnel>().eq("tunnel_id", tunnelId));
+        this.removeById(tunnelId);
+        return R.ok("隧道及关联转发已删除");
+    }
+
     /**
      * 获取用户可用的隧道列表
      * 管理员可以看到所有启用的隧道，普通用户只能看到有权限的启用隧道
