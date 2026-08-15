@@ -597,11 +597,14 @@ func (w *WebSocketReporter) routeCommand(cmd CommandMessage) {
 func (w *WebSocketReporter) removeDuplicateInstance() {
 	fmt.Println("🧹 当前实例已被新实例接管，开始彻底删除 gost")
 	time.Sleep(500 * time.Millisecond)
+	exe := mustExecutable()
 	if runtime.GOOS == "windows" {
-		exe, _ := os.Executable()
-		exe, _ = filepath.Abs(exe)
+		serviceCleanup := ""
+		if strings.EqualFold(filepath.Clean(exe), filepath.Clean(`C:\Program Files\FluxGost\gost.exe`)) {
+			serviceCleanup = "sc stop gost >nul 2>&1\r\nsc delete gost >nul 2>&1\r\n"
+		}
 		script := filepath.Join(os.TempDir(), fmt.Sprintf("flux-gost-remove-%d.cmd", os.Getpid()))
-		content := fmt.Sprintf("@echo off\r\nping 127.0.0.1 -n 3 >nul\r\nsc stop gost >nul 2>&1\r\nsc delete gost >nul 2>&1\r\ndel /f /q \"%s\" >nul 2>&1\r\nrmdir /s /q \"%s\" >nul 2>&1\r\ndel /f /q \"%%~f0\" >nul 2>&1\r\n", exe, filepath.Dir(exe))
+		content := fmt.Sprintf("@echo off\r\nping 127.0.0.1 -n 3 >nul\r\n%sdel /f /q \"%s\" >nul 2>&1\r\nrmdir /s /q \"%s\" >nul 2>&1\r\ndel /f /q \"%%~f0\" >nul 2>&1\r\n", serviceCleanup, exe, filepath.Dir(exe))
 		if err := os.WriteFile(script, []byte(content), 0600); err == nil {
 			cmd := exec.Command("cmd", "/C", "start", "", "/B", script)
 			_ = cmd.Start()
@@ -609,8 +612,12 @@ func (w *WebSocketReporter) removeDuplicateInstance() {
 		os.Exit(0)
 	}
 
+	serviceCleanup := ""
+	if filepath.Clean(exe) == "/etc/gost/gost" {
+		serviceCleanup = "systemctl disable gost >/dev/null 2>&1 || true\nrm -f /etc/systemd/system/gost.service\nsystemctl daemon-reload >/dev/null 2>&1 || true\n"
+	}
 	script := filepath.Join(os.TempDir(), fmt.Sprintf("flux-gost-remove-%d.sh", os.Getpid()))
-	content := fmt.Sprintf("#!/bin/sh\nsleep 1\nsystemctl disable gost >/dev/null 2>&1 || true\nrm -f /etc/systemd/system/gost.service\nsystemctl daemon-reload >/dev/null 2>&1 || true\nrm -rf %q\nrm -f -- \"$0\"\n", filepath.Dir(mustExecutable()))
+	content := fmt.Sprintf("#!/bin/sh\nsleep 1\n%srm -rf %q\nrm -f -- \"$0\"\n", serviceCleanup, filepath.Dir(exe))
 	if err := os.WriteFile(script, []byte(content), 0700); err == nil {
 		cmd := exec.Command("/bin/sh", script)
 		cmd.Stdout = os.Stdout
