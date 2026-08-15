@@ -47,10 +47,10 @@ download_valid_gost() {
       continue
     fi
     magic=$(head -c 2 "$out" 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n')
-    if [[ "$magic" == "7f454c46" ]]; then
+    if [[ "$magic" == "7f45" ]]; then
       return 0
     fi
-    echo "❌ 下载内容不是有效程序: $(head -c 32 "$out")"
+    echo "❌ 下载内容不是有效程序"
     rm -f "$out"
   done
   echo "❌ 下载失败，请检查网络或下载链接。"
