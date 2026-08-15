@@ -10,6 +10,7 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
 import org.springframework.boot.web.servlet.ServletContextInitializer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.web.socket.server.standard.ServletServerContainerFactoryBean;
 
 import javax.servlet.ServletContext;
 import javax.servlet.ServletException;
@@ -35,6 +36,15 @@ public class WebSocketConfig implements WebSocketConfigurer {
     @Bean
     public WebSocketHandler myHandler() {
         return new WebSocketServer();
+    }
+
+    @Bean
+    public ServletServerContainerFactoryBean createWebSocketContainer() {
+        ServletServerContainerFactoryBean container = new ServletServerContainerFactoryBean();
+        container.setMaxTextMessageBufferSize(1024 * 1024);
+        container.setMaxBinaryMessageBufferSize(1024 * 1024);
+        container.setMaxSessionIdleTimeout(120000L);
+        return container;
     }
 
 }
