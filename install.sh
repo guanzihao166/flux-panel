@@ -23,13 +23,41 @@ build_download_url() {
 }
 
 # 下载地址
-DOWNLOAD_URL=$(build_download_url)
-INSTALL_DIR="/etc/gost"
+DIRECT_URL=$(build_download_url)
+DOWNLOAD_URL="$DIRECT_URL"
 COUNTRY=$(curl -s https://ipinfo.io/country)
 if [ "$COUNTRY" = "CN" ]; then
-    # 拼接 URL
-    DOWNLOAD_URL="https://ghfast.top/${DOWNLOAD_URL}"
+    DOWNLOAD_URL="https://ghfast.top/${DIRECT_URL}"
 fi
+
+# 下载并校验二进制，主地址失败时自动回退
+download_valid_gost() {
+  local out="$1"
+  local url magic
+  for url in "$DOWNLOAD_URL" "$DIRECT_URL"; do
+    echo "⬇️ 下载 gost 中... $url"
+    if ! curl -fL "$url" -o "$out"; then
+      rm -f "$out"
+      echo "❌ 下载地址不可用，尝试备用地址"
+      continue
+    fi
+    if [[ ! -s "$out" ]]; then
+      rm -f "$out"
+      echo "❌ 下载文件为空，尝试备用地址"
+      continue
+    fi
+    magic=$(head -c 2 "$out" 2>/dev/null | od -An -tx1 2>/dev/null | tr -d ' \n')
+    if [[ "$magic" == "7f454c46" ]]; then
+      return 0
+    fi
+    echo "❌ 下载内容不是有效程序: $(head -c 32 "$out")"
+    rm -f "$out"
+  done
+  echo "❌ 下载失败，请检查网络或下载链接。"
+  return 1
+}
+
+INSTALL_DIR="/etc/gost"
 
 
 
@@ -171,17 +199,14 @@ install_gost() {
     systemctl disable gost 2>/dev/null && echo "🚫 禁用自启"
   fi
 
+  # 下载并校验 gost（不破坏现有文件，失败时保留旧版）
+  rm -f "$INSTALL_DIR/gost.new"
+  download_valid_gost "$INSTALL_DIR/gost.new" || exit 1
+  chmod +x "$INSTALL_DIR/gost.new"
+
   # 删除旧文件
   [[ -f "$INSTALL_DIR/gost" ]] && echo "🧹 删除旧文件 gost" && rm -f "$INSTALL_DIR/gost"
-
-  # 下载 gost
-  echo "⬇️ 下载 gost 中..."
-  curl -L "$DOWNLOAD_URL" -o "$INSTALL_DIR/gost"
-  if [[ ! -f "$INSTALL_DIR/gost" || ! -s "$INSTALL_DIR/gost" ]]; then
-    echo "❌ 下载失败，请检查网络或下载链接。"
-    exit 1
-  fi
-  chmod +x "$INSTALL_DIR/gost"
+  mv "$INSTALL_DIR/gost.new" "$INSTALL_DIR/gost"
   echo "✅ 下载完成"
 
   # 打印版本
@@ -260,8 +285,8 @@ update_gost() {
   
   # 先下载新版本
   echo "⬇️ 下载最新版本..."
-  curl -L "$DOWNLOAD_URL" -o "$INSTALL_DIR/gost.new"
-  if [[ ! -f "$INSTALL_DIR/gost.new" || ! -s "$INSTALL_DIR/gost.new" ]]; then
+  rm -f "$INSTALL_DIR/gost.new"
+  if ! download_valid_gost "$INSTALL_DIR/gost.new"; then
     echo "❌ 下载失败。"
     return 1
   fi
