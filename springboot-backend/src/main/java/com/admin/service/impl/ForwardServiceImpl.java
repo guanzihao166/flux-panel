@@ -1384,6 +1384,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         } catch (Exception e) {
             GostUtil.DeleteChains(inNode.getId(), serviceName);
             for (Long nodeId : createdRelays) GostUtil.DeleteRemoteService(nodeId, serviceName);
+            GostUtil.DeleteService(inNode.getId(), serviceName);
             return R.err("转发链创建失败: " + e.getMessage());
         }
     }
@@ -1500,6 +1501,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         } catch (Exception e) {
             GostUtil.DeleteChains(inNode.getId(), serviceName);
             for (Long nodeId : createdRelays) GostUtil.DeleteRemoteService(nodeId, serviceName);
+            GostUtil.DeleteService(inNode.getId(), serviceName);
             return R.err("转发端点链路创建失败: " + e.getMessage());
         }
     }

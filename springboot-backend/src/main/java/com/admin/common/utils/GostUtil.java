@@ -487,7 +487,8 @@ public class GostUtil {
         JSONObject selector = new JSONObject();
         selector.put("strategy", StringUtils.isBlank(strategy) ? "fifo" : strategy);
         selector.put("maxFails", maxFails == null || maxFails < 1 ? 1 : maxFails);
-        selector.put("failTimeout", (failTimeout == null || failTimeout < 5 ? 30 : failTimeout) + "s");
+        long failTimeoutSeconds = failTimeout == null || failTimeout < 5 ? 30 : failTimeout;
+        selector.put("failTimeout", failTimeoutSeconds * 1_000_000_000L);
         return selector;
     }
 
