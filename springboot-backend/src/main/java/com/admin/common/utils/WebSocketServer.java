@@ -241,7 +241,7 @@ public class WebSocketServer extends TextWebSocketHandler {
                 String tls = (String) session.getAttributes().get("tls");
                 String socks = (String) session.getAttributes().get("socks");
 
-                log.info("节点 {} 尝试连接，来源: {}，开始处理连接逻辑", nodeId, session.getRemoteAddress());
+                log.info("节点 {} 尝试连接，开始处理连接逻辑", nodeId);
 
                 // 检查是否已有该节点的连接，如果有则直接覆盖映射，不主动关闭旧连接。
                 // 主动关闭会让旧连接立即重连，残留进程存在时形成无限重连循环。
@@ -506,10 +506,6 @@ public class WebSocketServer extends TextWebSocketHandler {
             NodeRuntimeStats stats = nodeRuntimeStats.computeIfAbsent(nodeId, k -> new NodeRuntimeStats());
             stats.tcpConnections.set(obj.getLongValue("tcpConnections"));
             stats.udpConnections.set(obj.getLongValue("udpConnections"));
-
-            if (nodeId == 6L) {
-                log.info("节点 6 统计: tcp={} udp={} connectionStats={}", stats.tcpConnections.get(), stats.udpConnections.get(), obj.getJSONArray("connectionStats"));
-            }
 
             Map<String, List<ConnectionStatDto>> byService = new ConcurrentHashMap<>();
             JSONArray connections = obj.getJSONArray("connectionStats");
