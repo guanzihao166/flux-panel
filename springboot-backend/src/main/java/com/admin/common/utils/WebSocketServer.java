@@ -332,6 +332,7 @@ public class WebSocketServer extends TextWebSocketHandler {
                 log.info("节点 {} 当前活跃连接关闭，开始验证并更新状态", nodeId);
 
                     nodeSessions.remove(nodeId);
+                    nodeRuntimeStats.remove(nodeId);
 
                     // 更新节点状态为离线
                     Node node = nodeService.getById(nodeId);
@@ -523,7 +524,9 @@ public class WebSocketServer extends TextWebSocketHandler {
         for (NodeRuntimeStats stats : nodeRuntimeStats.values()) {
             for (List<ConnectionStatDto> connections : stats.connectionStats.values()) {
                 for (ConnectionStatDto dto : connections) {
-                    if (dto.getServiceName() != null && dto.getServiceName().startsWith(prefix)) {
+                    String serviceName = dto.getServiceName();
+                    // 只统计入口侧 _tcp/_udp，跳过出口中继 _tls，避免同一连接重复计数。
+                    if (serviceName != null && serviceName.startsWith(prefix) && !serviceName.endsWith("_tls")) {
                         result.add(dto);
                     }
                 }

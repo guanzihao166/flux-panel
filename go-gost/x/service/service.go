@@ -363,7 +363,11 @@ func (s *defaultService) trackConnection(conn net.Conn, clientAddr, clientIP str
 
 // shouldTrackConnection 兼容旧版本无元数据的面板转发服务。
 // 新服务通过 flux_forward_id 识别，旧服务名保持 {forwardId}_{userId}_{userTunnelId}[_tcp|_udp] 格式。
+// 出口中继服务（_tls）不参与活跃连接统计，避免一个用户连接被重复计数。
 func shouldTrackConnection(serviceName string, metadata map[string]any) bool {
+	if strings.HasSuffix(serviceName, "_tls") {
+		return false
+	}
 	if metadataString(metadata, "flux_forward_id") != "" {
 		return true
 	}
