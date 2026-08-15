@@ -208,6 +208,50 @@ get_config_params() {
   JWT_SECRET=$(generate_random)
 }
 
+# 恢复已存在的 Cloudflare 源站反代入口（80/443）
+restore_origin_proxy() {
+  local nginx_conf="/root/flux-nginx.conf"
+  local cert="/root/flux-origin.crt"
+  local key="/root/flux-origin.key"
+  if [[ ! -f "$nginx_conf" || ! -f "$cert" || ! -f "$key" ]]; then
+    return 0
+  fi
+  if ! command -v python3 &> /dev/null; then
+    echo "⚠️ 检测到已有域名反代配置，但缺少 python3，跳过 80/443 自动恢复"
+    return 0
+  fi
+  echo "🌐 检测到 flux.m7mt.com 反代配置，恢复 80/443 入口..."
+  python3 - "$nginx_conf" "$cert" "$key" <<'PY'
+import sys
+
+compose = "docker-compose.yml"
+nginx_conf, cert, key = sys.argv[1:4]
+with open(compose, "r", encoding="utf-8") as f:
+    content = f.read()
+
+marker = '    ports:\n      - "${FRONTEND_PORT}:80"\n'
+if marker not in content:
+    print("⚠️ 未找到前端端口配置，跳过 80/443 恢复")
+    sys.exit(0)
+
+ports = (
+    marker
+    + '      - "80:80"\n'
+    + '      - "443:443"\n'
+)
+volumes = (
+    "    volumes:\n"
+    + f"      - {nginx_conf}:/etc/nginx/nginx.conf:ro\n"
+    + f"      - {cert}:/etc/nginx/flux-origin.crt:ro\n"
+    + f"      - {key}:/etc/nginx/flux-origin.key:ro\n"
+)
+content = content.replace(marker, ports + volumes, 1)
+with open(compose, "w", encoding="utf-8") as f:
+    f.write(content)
+print("✅ 80/443 反代入口已加入 docker-compose.yml")
+PY
+}
+
 # 安装功能
 install_panel() {
   echo "🚀 开始安装面板..."
@@ -268,6 +312,8 @@ update_panel() {
   echo "📡 选择配置文件：$(basename "$DOCKER_COMPOSE_URL")"
   curl -L -o docker-compose.yml "$DOCKER_COMPOSE_URL"
   echo "✅ 下载完成"
+
+  restore_origin_proxy
 
   # 自动检测并配置 IPv6 支持
   if check_ipv6_support; then
