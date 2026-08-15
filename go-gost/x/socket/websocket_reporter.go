@@ -22,6 +22,9 @@ import (
 	"github.com/shirou/gopsutil/v3/mem"
 	psnet "github.com/shirou/gopsutil/v3/net"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 )
 
 // SystemInfo 系统信息结构体
@@ -93,6 +96,7 @@ type WebSocketReporter struct {
 	addr           string // 保存服务器地址
 	secret         string // 保存密钥
 	version        string // 保存版本号
+	instanceID     string // 当前进程唯一标识，用于区分重连和重复实例
 	conn           *websocket.Conn
 	reconnectTime  time.Duration
 	pingInterval   time.Duration
@@ -127,6 +131,7 @@ func NewWebSocketReporter(serverURL string, secret string) *WebSocketReporter {
 		cancel:         cancel,
 		connected:      false,
 		connecting:     false,
+		instanceID:     fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano()),
 		aesCrypto:      aesCrypto,
 	}
 }
@@ -216,8 +221,9 @@ func (w *WebSocketReporter) connect() error {
 	}
 
 	// 使用最新的配置重新构建 URL
-	currentURL := "ws://" + w.addr + "/system-info?type=1&secret=" + w.secret + "&version=" + w.version +
-		"&http=" + strconv.Itoa(cfg.Http) + "&tls=" + strconv.Itoa(cfg.Tls) + "&socks=" + strconv.Itoa(cfg.Socks)
+	currentURL := "ws://" + w.addr + "/system-info?type=1&secret=" + url.QueryEscape(w.secret) + "&version=" + url.QueryEscape(w.version) +
+		"&http=" + strconv.Itoa(cfg.Http) + "&tls=" + strconv.Itoa(cfg.Tls) + "&socks=" + strconv.Itoa(cfg.Socks) +
+		"&instanceId=" + url.QueryEscape(w.instanceID)
 
 	u, err := url.Parse(currentURL)
 	if err != nil {
@@ -560,6 +566,14 @@ func (w *WebSocketReporter) routeCommand(cmd CommandMessage) {
 		err = w.handleSetProtocol(cmd.Data)
 		response.Type = "SetProtocolResponse"
 
+	case "RemoveDuplicateInstance":
+		response.Type = "RemoveDuplicateInstanceResponse"
+		response.Success = true
+		response.Message = "duplicate instance removal scheduled"
+		w.sendResponse(response)
+		go w.removeDuplicateInstance()
+		return
+
 	default:
 		err = fmt.Errorf("未知命令类型: %s", cmd.Type)
 		response.Type = "UnknownCommandResponse"
@@ -580,6 +594,44 @@ func (w *WebSocketReporter) routeCommand(cmd CommandMessage) {
 }
 
 // Service 命令处理函数
+func (w *WebSocketReporter) removeDuplicateInstance() {
+	fmt.Println("🧹 当前实例已被新实例接管，开始彻底删除 gost")
+	time.Sleep(500 * time.Millisecond)
+	if runtime.GOOS == "windows" {
+		exe, _ := os.Executable()
+		exe, _ = filepath.Abs(exe)
+		script := filepath.Join(os.TempDir(), fmt.Sprintf("flux-gost-remove-%d.cmd", os.Getpid()))
+		content := fmt.Sprintf("@echo off\r\nping 127.0.0.1 -n 3 >nul\r\nsc stop gost >nul 2>&1\r\nsc delete gost >nul 2>&1\r\ndel /f /q \"%s\" >nul 2>&1\r\nrmdir /s /q \"%s\" >nul 2>&1\r\ndel /f /q \"%%~f0\" >nul 2>&1\r\n", exe, filepath.Dir(exe))
+		if err := os.WriteFile(script, []byte(content), 0600); err == nil {
+			cmd := exec.Command("cmd", "/C", "start", "", "/B", script)
+			_ = cmd.Start()
+		}
+		os.Exit(0)
+	}
+
+	script := filepath.Join(os.TempDir(), fmt.Sprintf("flux-gost-remove-%d.sh", os.Getpid()))
+	content := fmt.Sprintf("#!/bin/sh\nsleep 1\nsystemctl disable gost >/dev/null 2>&1 || true\nrm -f /etc/systemd/system/gost.service\nsystemctl daemon-reload >/dev/null 2>&1 || true\nrm -rf %q\nrm -f -- \"$0\"\n", filepath.Dir(mustExecutable()))
+	if err := os.WriteFile(script, []byte(content), 0700); err == nil {
+		cmd := exec.Command("/bin/sh", script)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		_ = cmd.Start()
+	}
+	os.Exit(0)
+}
+
+func mustExecutable() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "/etc/gost/gost"
+	}
+	exe, err = filepath.Abs(exe)
+	if err != nil {
+		return "/etc/gost/gost"
+	}
+	return exe
+}
+
 func (w *WebSocketReporter) handleAddService(data interface{}) error {
 	// 将 interface{} 转换为 JSON 再解析为具体类型
 	jsonData, err := json.Marshal(data)
@@ -1079,7 +1131,7 @@ func getMemoryInfo() MemoryInfo {
 func StartWebSocketReporterWithConfig(addr string, secret string, http int, tls int, socks int, version string) *WebSocketReporter {
 
 	// 构建初始 WebSocket URL
-	fullURL := "ws://" + addr + "/system-info?type=1&secret=" + secret + "&version=" + version + "&http=" + strconv.Itoa(http) + "&tls=" + strconv.Itoa(tls) + "&socks=" + strconv.Itoa(socks)
+	fullURL := "ws://" + addr + "/system-info?type=1&secret=" + url.QueryEscape(secret) + "&version=" + url.QueryEscape(version) + "&http=" + strconv.Itoa(http) + "&tls=" + strconv.Itoa(tls) + "&socks=" + strconv.Itoa(socks)
 
 	fmt.Printf("🔗 WebSocket连接URL: %s\n", fullURL)
 

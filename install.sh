@@ -65,6 +65,7 @@ stop_all_gost() {
   echo "🧹 删除残留 gost 进程..."
   pkill -9 -f '/etc/gost/gost' 2>/dev/null || true
   pkill -9 -x gost 2>/dev/null || true
+  rm -f /tmp/flux-gost-*.lock /var/run/flux-gost-*.lock 2>/dev/null || true
   sleep 1
 }
 

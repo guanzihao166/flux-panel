@@ -43,6 +43,9 @@ public class WebSocketServer extends TextWebSocketHandler {
     // 存储节点ID和对应的WebSocket session映射
     private static final ConcurrentHashMap<Long, WebSocketSession> nodeSessions = new ConcurrentHashMap<>();
 
+    // 每个节点连接切换锁，确保旧实例收到删除命令后新会话才完成接管。
+    private static final ConcurrentHashMap<Long, Object> nodeTakeoverLocks = new ConcurrentHashMap<>();
+
     // 为每个session提供锁对象，防止并发发送消息
     private static final ConcurrentHashMap<String, Object> sessionLocks = new ConcurrentHashMap<>();
 
@@ -243,11 +246,37 @@ public class WebSocketServer extends TextWebSocketHandler {
 
                 log.info("节点 {} 尝试连接，开始处理连接逻辑", nodeId);
 
-                // 检查是否已有该节点的连接，如果有则直接覆盖映射，不主动关闭旧连接。
-                // 主动关闭会让旧连接立即重连，残留进程存在时形成无限重连循环。
-                WebSocketSession existingSession = nodeSessions.put(nodeId, session);
-                if (existingSession != null && existingSession.isOpen()) {
-                    log.info("节点 {} 已有连接存在: {}，新连接将覆盖旧连接", nodeId, existingSession.getId());
+                // 同一节点只允许一个实例。不同 instanceId 的新实例接管时，先命令旧实例
+                // 停止服务并删除 systemd、配置目录和二进制，再关闭旧会话。
+                Object takeoverLock = nodeTakeoverLocks.computeIfAbsent(nodeId, k -> new Object());
+                synchronized (takeoverLock) {
+                    WebSocketSession existingSession = nodeSessions.get(nodeId);
+                    if (existingSession != null && existingSession.isOpen() && !existingSession.equals(session)) {
+                        String existingInstanceId = (String) existingSession.getAttributes().get("instanceId");
+                        String newInstanceId = (String) session.getAttributes().get("instanceId");
+                        if (StringUtils.isNotBlank(existingInstanceId) && Objects.equals(existingInstanceId, newInstanceId)) {
+                            log.info("节点 {} 的同一实例发生重连，关闭旧会话 {}", nodeId, existingSession.getId());
+                        } else {
+                            log.warn("节点 {} 检测到重复实例，旧实例 {} 将被彻底删除，新实例 {} 接管", nodeId, existingInstanceId, newInstanceId);
+                            JSONObject removeCommand = new JSONObject();
+                            removeCommand.put("type", "RemoveDuplicateInstance");
+                            removeCommand.put("requestId", UUID.randomUUID().toString());
+                            removeCommand.put("data", new JSONObject());
+                            try {
+                                String oldSecret = (String) existingSession.getAttributes().get("nodeSecret");
+                                sendToUser(existingSession, removeCommand.toJSONString(), oldSecret);
+                                Thread.sleep(750L);
+                            } catch (Exception e) {
+                                log.warn("节点 {} 向旧实例发送删除命令失败: {}", nodeId, e.getMessage());
+                            }
+                        }
+                        try {
+                            existingSession.close(CloseStatus.POLICY_VIOLATION);
+                        } catch (Exception e) {
+                            log.warn("节点 {} 关闭旧会话失败: {}", nodeId, e.getMessage());
+                        }
+                    }
+                    nodeSessions.put(nodeId, session);
                 }
 
                 // 更新节点状态为在线
