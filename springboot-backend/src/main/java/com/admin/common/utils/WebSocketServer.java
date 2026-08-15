@@ -86,7 +86,10 @@ public class WebSocketServer extends TextWebSocketHandler {
                 String decryptedPayload = decryptMessageIfNeeded(message.getPayload(), nodeSecret);
 
                 if (decryptedPayload.contains("memory_usage")){
-                    updateNodeRuntimeStats(id, decryptedPayload);
+                    // 只接受当前活跃会话的统计，旧会话可能来自残留进程，数据会覆盖当前统计。
+                    if (Objects.equals(type, "1") && isCurrentNodeSession(id, session)) {
+                        updateNodeRuntimeStats(id, decryptedPayload);
+                    }
                     // 先发送确认消息
                     sendToUser(session, "{\"type\":\"call\"}", nodeSecret);
                 }else if (decryptedPayload.contains("requestId")) {
@@ -485,6 +488,14 @@ public class WebSocketServer extends TextWebSocketHandler {
                 log.info("发送消息到节点 {} 失败: {}", node_id, e.getMessage(), e);
             }
             return result;
+        }
+    }
+
+    private static boolean isCurrentNodeSession(String id, WebSocketSession session) {
+        try {
+            return nodeSessions.get(Long.valueOf(id)) == session;
+        } catch (NumberFormatException e) {
+            return false;
         }
     }
 
