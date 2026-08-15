@@ -9,6 +9,7 @@ import { Chip } from "@heroui/chip";
 import { Spinner } from "@heroui/spinner";
 import { Switch } from "@heroui/switch";
 import { Alert } from "@heroui/alert";
+import { Divider } from "@heroui/divider";
 import { Accordion, AccordionItem } from "@heroui/accordion";
 import toast from 'react-hot-toast';
 import {
@@ -44,7 +45,8 @@ import {
   diagnoseForward,
   probeForward,
   probeAllForwards,
-  updateForwardOrder
+  updateForwardOrder,
+  getForwardConnections
 } from "@/api";
 import { JwtUtil } from "@/utils/jwt";
 
@@ -71,11 +73,23 @@ interface Forward {
   probeTime?: number | null;
   probeMessage?: string;
   targetWeights?: string;
+  mode?: string;
+  chainStrategy?: string;
+  chainHops?: number;
+  tunnelIds?: string;
+  bandwidthMode?: string;
+  bandwidthUp?: number;
+  bandwidthDown?: number;
+  bandwidthCombined?: number;
+  maxSourceIps?: number;
+  maxConnPerIp?: number;
+  expireAt?: number;
 }
 
 interface Tunnel {
   id: number;
   name: string;
+  type?: number;
   inNodePortSta?: number;
   inNodePortEnd?: number;
 }
@@ -90,6 +104,33 @@ interface ForwardForm {
   interfaceName?: string;
   strategy: string;
   targetWeights: string;
+  mode: string;
+  chainStrategy: string;
+  chainHops: number;
+  tunnelIds: string;
+  bandwidthMode: string;
+  bandwidthUp: number;
+  bandwidthDown: number;
+  bandwidthCombined: number;
+  maxSourceIps: number;
+  maxConnPerIp: number;
+  expireAt: number | null;
+}
+
+interface ConnectionStat {
+  connectionId: string;
+  startTime: number;
+  clientAddr: string;
+  targetAddr: string;
+  realTarget: string;
+  localAddr: string;
+  type: string;
+  entryServer: string;
+  forwarder: string;
+  upload: number;
+  download: number;
+  serviceName: string;
+  nodeId?: number;
 }
 
 interface AddressItem {
@@ -172,6 +213,10 @@ export default function ForwardPage() {
   const [forwardToDelete, setForwardToDelete] = useState<Forward | null>(null);
   const [currentDiagnosisForward, setCurrentDiagnosisForward] = useState<Forward | null>(null);
   const [diagnosisResult, setDiagnosisResult] = useState<DiagnosisResult | null>(null);
+  const [connModalOpen, setConnModalOpen] = useState(false);
+  const [connLoading, setConnLoading] = useState(false);
+  const [connections, setConnections] = useState<ConnectionStat[]>([]);
+  const [currentConnForward, setCurrentConnForward] = useState<Forward | null>(null);
   const [addressModalTitle, setAddressModalTitle] = useState('');
   const [addressList, setAddressList] = useState<AddressItem[]>([]);
 
@@ -201,7 +246,18 @@ export default function ForwardPage() {
     remoteAddr: '',
     interfaceName: '',
     strategy: 'fifo',
-    targetWeights: ''
+    targetWeights: '',
+    mode: 'direct',
+    chainStrategy: 'smart',
+    chainHops: 0,
+    tunnelIds: '',
+    bandwidthMode: 'none',
+    bandwidthUp: 0,
+    bandwidthDown: 0,
+    bandwidthCombined: 0,
+    maxSourceIps: 0,
+    maxConnPerIp: 0,
+    expireAt: null
   });
 
   // 表单验证错误
@@ -431,6 +487,20 @@ export default function ForwardPage() {
       }
     }
 
+    const endpointTunnelIds = form.tunnelIds.split(',').map(v => Number(v.trim())).filter(Boolean);
+    if (form.mode !== 'direct' && endpointTunnelIds.length === 0) {
+      newErrors.tunnelIds = '单跳或链式转发必须至少选择一个转发端点';
+    }
+    if (form.mode === 'chain' && !['smart', 'fixed_first', 'fixed_last'].includes(form.chainStrategy)) {
+      newErrors.chainStrategy = '请选择转发链选择方式';
+    }
+    if (form.bandwidthUp < 0 || form.bandwidthDown < 0 || form.bandwidthCombined < 0) {
+      newErrors.bandwidthMode = '带宽限制不能为负数';
+    }
+    if (form.maxSourceIps < 0 || form.maxConnPerIp < 0) {
+      newErrors.maxConnPerIp = '连接限制不能为负数';
+    }
+
     if (form.inPort !== null && (form.inPort < 1 || form.inPort > 65535)) {
       newErrors.inPort = '端口号必须在1-65535之间';
     }
@@ -455,7 +525,18 @@ export default function ForwardPage() {
       remoteAddr: '',
       interfaceName: '',
       strategy: 'fifo',
-      targetWeights: ''
+      targetWeights: '',
+      mode: 'direct',
+      chainStrategy: 'smart',
+      chainHops: 0,
+      tunnelIds: '',
+      bandwidthMode: 'none',
+      bandwidthUp: 0,
+      bandwidthDown: 0,
+      bandwidthCombined: 0,
+      maxSourceIps: 0,
+      maxConnPerIp: 0,
+      expireAt: null
     });
     setSelectedTunnel(null);
     setErrors({});
@@ -474,7 +555,18 @@ export default function ForwardPage() {
       remoteAddr: forward.remoteAddr.split(',').join('\n'),
       interfaceName: forward.interfaceName || '',
       strategy: forward.strategy || 'fifo',
-      targetWeights: forward.targetWeights || forward.remoteAddr.split(',').map(() => '1').join(',')
+      targetWeights: forward.targetWeights || forward.remoteAddr.split(',').map(() => '1').join(','),
+      mode: forward.mode || 'direct',
+      chainStrategy: forward.chainStrategy || 'smart',
+      chainHops: forward.chainHops || 0,
+      tunnelIds: forward.tunnelIds || '',
+      bandwidthMode: forward.bandwidthMode || 'none',
+      bandwidthUp: forward.bandwidthUp || 0,
+      bandwidthDown: forward.bandwidthDown || 0,
+      bandwidthCombined: forward.bandwidthCombined || 0,
+      maxSourceIps: forward.maxSourceIps || 0,
+      maxConnPerIp: forward.maxConnPerIp || 0,
+      expireAt: forward.expireAt || null
     });
     const tunnel = tunnels.find(t => t.id === forward.tunnelId);
     setSelectedTunnel(tunnel || null);
@@ -540,8 +632,6 @@ export default function ForwardPage() {
         .filter(addr => addr)
         .join(',');
 
-      const addressCount = processedRemoteAddr.split(',').length;
-
       let res;
       if (isEdit) {
         // 更新时确保包含必要字段
@@ -553,8 +643,19 @@ export default function ForwardPage() {
           inPort: form.inPort,
           remoteAddr: processedRemoteAddr,
           interfaceName: form.interfaceName,
-          strategy: addressCount > 1 ? form.strategy : 'fifo',
-          targetWeights: form.targetWeights
+          strategy: form.strategy,
+          targetWeights: form.targetWeights,
+          mode: form.mode,
+          chainStrategy: form.chainStrategy,
+          chainHops: form.chainHops,
+          tunnelIds: form.mode === 'direct' ? '' : form.tunnelIds,
+          bandwidthMode: form.bandwidthMode,
+          bandwidthUp: form.bandwidthUp || 0,
+          bandwidthDown: form.bandwidthDown || 0,
+          bandwidthCombined: form.bandwidthCombined || 0,
+          maxSourceIps: form.maxSourceIps || 0,
+          maxConnPerIp: form.maxConnPerIp || 0,
+          expireAt: form.expireAt || 0
         };
         res = await updateForward(updateData);
       } else {
@@ -565,8 +666,19 @@ export default function ForwardPage() {
           inPort: form.inPort,
           remoteAddr: processedRemoteAddr,
           interfaceName: form.interfaceName,
-          strategy: addressCount > 1 ? form.strategy : 'fifo',
-          targetWeights: form.targetWeights
+          strategy: form.strategy,
+          targetWeights: form.targetWeights,
+          mode: form.mode,
+          chainStrategy: form.chainStrategy,
+          chainHops: form.chainHops,
+          tunnelIds: form.mode === 'direct' ? '' : form.tunnelIds,
+          bandwidthMode: form.bandwidthMode,
+          bandwidthUp: form.bandwidthUp || 0,
+          bandwidthDown: form.bandwidthDown || 0,
+          bandwidthCombined: form.bandwidthCombined || 0,
+          maxSourceIps: form.maxSourceIps || 0,
+          maxConnPerIp: form.maxConnPerIp || 0,
+          expireAt: form.expireAt || 0
         };
         res = await createForward(createData);
       }
@@ -703,6 +815,26 @@ export default function ForwardPage() {
     }
   };
 
+  const handleConnections = async (forward: Forward) => {
+    setCurrentConnForward(forward);
+    setConnModalOpen(true);
+    setConnLoading(true);
+    setConnections([]);
+    try {
+      const response = await getForwardConnections(forward.id);
+      if (response.code === 0) {
+        setConnections(response.data || []);
+      } else {
+        toast.error(response.msg || '获取连接统计失败');
+      }
+    } catch (error) {
+      console.error('获取连接统计失败:', error);
+      toast.error('获取连接统计失败');
+    } finally {
+      setConnLoading(false);
+    }
+  };
+
   const handleProbeOne = async (forward: Forward) => {
     const response = await probeForward(forward.id);
     if (response.code === 0) {
@@ -745,6 +877,14 @@ export default function ForwardPage() {
     if (value < 1024 * 1024) return (value / 1024).toFixed(2) + ' KB';
     if (value < 1024 * 1024 * 1024) return (value / (1024 * 1024)).toFixed(2) + ' MB';
     return (value / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+  };
+
+  const formatTimestamp = (value?: number | null): string => {
+    return value ? new Date(value).toLocaleString('zh-CN') : '-';
+  };
+
+  const toDatetimeLocal = (value?: number | null): string => {
+    return value ? new Date(value).toISOString().slice(0, 16) : '';
   };
 
   // 格式化入口地址
@@ -1077,13 +1217,6 @@ export default function ForwardPage() {
     }
   };
 
-  // 获取地址数量
-  const getAddressCount = (addressString: string): number => {
-    if (!addressString) return 0;
-    const addresses = addressString.split('\n').map(addr => addr.trim()).filter(addr => addr);
-    return addresses.length;
-  };
-
   // 处理拖拽结束
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
@@ -1364,6 +1497,21 @@ export default function ForwardPage() {
           </div>
 
           <div className="flex gap-1.5 mt-3">
+            <Button
+              size="sm"
+              variant="flat"
+              color="primary"
+              onPress={() => handleConnections(forward)}
+              className="flex-1 min-h-8"
+              title="查看当前活跃连接"
+              startContent={
+                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+                </svg>
+              }
+            >
+              连接
+            </Button>
             <Button
               size="sm"
               variant="flat"
@@ -1728,37 +1876,183 @@ export default function ForwardPage() {
                       description="用于多IP服务器指定使用那个IP请求远程地址，不懂的默认为空就行"
                     />
 
-                    {getAddressCount(form.remoteAddr) > 1 && (
-                      <>
+                    <Select
+                      label="转发模式"
+                      placeholder="请选择转发模式"
+                      selectedKeys={[form.mode]}
+                      onSelectionChange={(keys) => {
+                        const selectedKey = Array.from(keys)[0] as string;
+                        setForm(prev => ({ ...prev, mode: selectedKey }));
+                      }}
+                      variant="bordered"
+                    >
+                      <SelectItem key="direct">直连</SelectItem>
+                      <SelectItem key="single">单跳转发</SelectItem>
+                      <SelectItem key="chain">链式转发</SelectItem>
+                    </Select>
+
+                    {form.mode !== 'direct' && (
                       <Select
-                        label="负载策略"
-                        placeholder="请选择负载均衡策略"
-                        selectedKeys={[form.strategy]}
+                        label="转发端点组"
+                        placeholder="请选择一个或多个转发端点"
+                        selectionMode="multiple"
+                        selectedKeys={new Set(form.tunnelIds.split(',').filter(Boolean))}
                         onSelectionChange={(keys) => {
-                          const selectedKey = Array.from(keys)[0] as string;
-                          setForm(prev => ({ ...prev, strategy: selectedKey }));
+                          const values = Array.from(keys).map(String);
+                          setForm(prev => ({ ...prev, tunnelIds: values.join(',') }));
                         }}
+                        isInvalid={!!errors.tunnelIds}
+                        errorMessage={errors.tunnelIds}
                         variant="bordered"
-                        description="多个目标地址的负载均衡策略"
+                        description="选择隧道管理中创建的「转发端点」类型隧道"
                       >
-                        <SelectItem key="fifo" >主备模式 - 自上而下</SelectItem>
-                        <SelectItem key="round" >轮询模式 - 依次轮换</SelectItem>
-                        <SelectItem key="rand" >随机模式 - 随机选择</SelectItem>
-                        <SelectItem key="hash" >哈希模式 - IP哈希</SelectItem>
-                        <SelectItem key="wrr" >加权轮询 - 按权重平滑分配</SelectItem>
+                        {tunnels.filter(t => t.type === 3).map((tunnel) => (
+                          <SelectItem key={tunnel.id}>{tunnel.name}</SelectItem>
+                        ))}
                       </Select>
-                      {form.strategy === 'wrr' && (
+                    )}
+
+                    {form.mode === 'chain' && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <Select
+                          label="转发链选择"
+                          placeholder="请选择转发链选择方式"
+                          selectedKeys={[form.chainStrategy]}
+                          onSelectionChange={(keys) => {
+                            const selectedKey = Array.from(keys)[0] as string;
+                            setForm(prev => ({ ...prev, chainStrategy: selectedKey }));
+                          }}
+                          isInvalid={!!errors.chainStrategy}
+                          errorMessage={errors.chainStrategy}
+                          variant="bordered"
+                        >
+                          <SelectItem key="smart">智能选择</SelectItem>
+                          <SelectItem key="fixed_first">固定前N跳</SelectItem>
+                          <SelectItem key="fixed_last">固定后N跳</SelectItem>
+                        </Select>
+                        {(form.chainStrategy === 'fixed_first' || form.chainStrategy === 'fixed_last') && (
+                          <Input
+                            label="固定跳数"
+                            type="number"
+                            min={1}
+                            max={100}
+                            value={form.chainHops.toString()}
+                            onChange={(e) => setForm(prev => ({ ...prev, chainHops: Number(e.target.value) || 0 }))}
+                            variant="bordered"
+                          />
+                        )}
+                      </div>
+                    )}
+
+                    <Select
+                      label="转发负载策略"
+                      placeholder="请选择负载均衡策略"
+                      selectedKeys={[form.strategy]}
+                      onSelectionChange={(keys) => {
+                        const selectedKey = Array.from(keys)[0] as string;
+                        setForm(prev => ({ ...prev, strategy: selectedKey }));
+                      }}
+                      variant="bordered"
+                      description="故障转移与负载均衡；转发端点组或远程多地址都使用该策略"
+                    >
+                      <SelectItem key="fifo" >故障转移（主备顺序）</SelectItem>
+                      <SelectItem key="round" >轮询</SelectItem>
+                      <SelectItem key="wrr" >加权轮询</SelectItem>
+                    </Select>
+                    {form.strategy === 'wrr' && (
+                      <Input
+                        label="目标权重"
+                        value={form.targetWeights}
+                        onChange={(e) => setForm(prev => ({ ...prev, targetWeights: e.target.value }))}
+                        placeholder="例如 5,2,1"
+                        description="与远程地址或转发端点顺序一致，范围 1-100，留空按 1"
+                        variant="bordered"
+                      />
+                    )}
+
+                    <Divider />
+
+                    <Select
+                      label="带宽限制"
+                      selectedKeys={[form.bandwidthMode]}
+                      onSelectionChange={(keys) => {
+                        const selectedKey = Array.from(keys)[0] as string;
+                        setForm(prev => ({ ...prev, bandwidthMode: selectedKey }));
+                      }}
+                      isInvalid={!!errors.bandwidthMode}
+                      errorMessage={errors.bandwidthMode}
+                      variant="bordered"
+                    >
+                      <SelectItem key="none">不限速</SelectItem>
+                      <SelectItem key="separate">独立限上行/下行</SelectItem>
+                      <SelectItem key="combined">上下行一起限制</SelectItem>
+                    </Select>
+                    {form.bandwidthMode === 'separate' && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <Input
-                          label="目标权重"
-                          value={form.targetWeights}
-                          onChange={(e) => setForm(prev => ({ ...prev, targetWeights: e.target.value }))}
-                          placeholder="例如 5,2,1"
-                          description="与远程地址顺序一致，范围 1-100，留空按 1"
+                          label="上行限速（MB/s）"
+                          type="number"
+                          min={0}
+                          value={form.bandwidthUp.toString()}
+                          onChange={(e) => setForm(prev => ({ ...prev, bandwidthUp: Number(e.target.value) || 0 }))}
                           variant="bordered"
                         />
-                      )}
-                      </>
+                        <Input
+                          label="下行限速（MB/s）"
+                          type="number"
+                          min={0}
+                          value={form.bandwidthDown.toString()}
+                          onChange={(e) => setForm(prev => ({ ...prev, bandwidthDown: Number(e.target.value) || 0 }))}
+                          variant="bordered"
+                        />
+                      </div>
                     )}
+                    {form.bandwidthMode === 'combined' && (
+                      <Input
+                        label="合计限速（MB/s）"
+                        type="number"
+                        min={0}
+                        value={form.bandwidthCombined.toString()}
+                        onChange={(e) => setForm(prev => ({ ...prev, bandwidthCombined: Number(e.target.value) || 0 }))}
+                        variant="bordered"
+                        description="上行和下行共享这个总带宽"
+                      />
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <Input
+                        label="最大来源IP数"
+                        type="number"
+                        min={0}
+                        value={form.maxSourceIps.toString()}
+                        onChange={(e) => setForm(prev => ({ ...prev, maxSourceIps: Number(e.target.value) || 0 }))}
+                        isInvalid={!!errors.maxConnPerIp}
+                        errorMessage={errors.maxConnPerIp}
+                        variant="bordered"
+                        description="0 表示不限"
+                      />
+                      <Input
+                        label="每IP最大连接数"
+                        type="number"
+                        min={0}
+                        value={form.maxConnPerIp.toString()}
+                        onChange={(e) => setForm(prev => ({ ...prev, maxConnPerIp: Number(e.target.value) || 0 }))}
+                        variant="bordered"
+                        description="0 表示不限"
+                      />
+                    </div>
+
+                    <Input
+                      label="端口到期时间"
+                      type="datetime-local"
+                      value={toDatetimeLocal(form.expireAt)}
+                      onChange={(e) => setForm(prev => ({
+                        ...prev,
+                        expireAt: e.target.value ? new Date(e.target.value).getTime() : null
+                      }))}
+                      variant="bordered"
+                      description="到期后该转发拒绝新连接，留空表示永不过期"
+                    />
                   </div>
                 </ModalBody>
                 <ModalFooter>
@@ -2250,6 +2544,111 @@ export default function ForwardPage() {
                       isLoading={diagnosisLoading}
                     >
                       重新诊断
+                    </Button>
+                  )}
+                </ModalFooter>
+              </>
+            )}
+          </ModalContent>
+        </Modal>
+
+        {/* 活跃连接统计 */}
+        <Modal
+          isOpen={connModalOpen}
+          onOpenChange={setConnModalOpen}
+          size="4xl"
+          scrollBehavior="outside"
+          backdrop="blur"
+          placement="center"
+        >
+          <ModalContent>
+            {(onClose) => (
+              <>
+                <ModalHeader className="flex flex-col gap-1">
+                  <h2 className="text-xl font-bold">活跃连接</h2>
+                  {currentConnForward && (
+                    <p className="text-small text-default-500">
+                      {currentConnForward.name} · 共 {connections.length} 个连接
+                    </p>
+                  )}
+                </ModalHeader>
+                <ModalBody>
+                  {connLoading ? (
+                    <div className="flex items-center justify-center py-16">
+                      <div className="flex items-center gap-3">
+                        <Spinner size="sm" />
+                        <span className="text-default-600">正在获取连接统计...</span>
+                      </div>
+                    </div>
+                  ) : connections.length === 0 ? (
+                    <div className="text-center py-16">
+                      <div className="w-16 h-16 bg-default-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <svg className="w-8 h-8 text-default-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                      </div>
+                      <h3 className="text-lg font-semibold text-foreground">当前没有活跃连接</h3>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="min-w-[1200px] w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-default-50 text-default-500 text-xs">
+                            <th className="px-3 py-2 font-medium border border-default-200 dark:border-default-700">连接ID</th>
+                            <th className="px-3 py-2 font-medium border border-default-200 dark:border-default-700">开始时间</th>
+                            <th className="px-3 py-2 font-medium border border-default-200 dark:border-default-700">客户端地址</th>
+                            <th className="px-3 py-2 font-medium border border-default-200 dark:border-default-700">目标地址</th>
+                            <th className="px-3 py-2 font-medium border border-default-200 dark:border-default-700">真实目标</th>
+                            <th className="px-3 py-2 font-medium border border-default-200 dark:border-default-700">本地地址</th>
+                            <th className="px-3 py-2 font-medium border border-default-200 dark:border-default-700">类型</th>
+                            <th className="px-3 py-2 font-medium border border-default-200 dark:border-default-700">入口服务器</th>
+                            <th className="px-3 py-2 font-medium border border-default-200 dark:border-default-700">转发器</th>
+                            <th className="px-3 py-2 font-medium border border-default-200 dark:border-default-700">上传</th>
+                            <th className="px-3 py-2 font-medium border border-default-200 dark:border-default-700">下载</th>
+                            <th className="px-3 py-2 font-medium border border-default-200 dark:border-default-700">操作</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {connections.map((conn) => (
+                            <tr key={conn.connectionId} className="hover:bg-default-50 text-default-600 text-xs align-top">
+                              <td className="px-3 py-2 border border-default-200 dark:border-default-700 font-mono max-w-[150px] truncate" title={conn.connectionId}>{conn.connectionId}</td>
+                              <td className="px-3 py-2 border border-default-200 dark:border-default-700 whitespace-nowrap">{formatTimestamp(conn.startTime)}</td>
+                              <td className="px-3 py-2 border border-default-200 dark:border-default-700 font-mono max-w-[180px] truncate" title={conn.clientAddr}>{conn.clientAddr || '-'}</td>
+                              <td className="px-3 py-2 border border-default-200 dark:border-default-700 font-mono max-w-[180px] truncate" title={conn.targetAddr}>{conn.targetAddr || '-'}</td>
+                              <td className="px-3 py-2 border border-default-200 dark:border-default-700 font-mono max-w-[180px] truncate" title={conn.realTarget}>{conn.realTarget || '-'}</td>
+                              <td className="px-3 py-2 border border-default-200 dark:border-default-700 font-mono max-w-[180px] truncate" title={conn.localAddr}>{conn.localAddr || '-'}</td>
+                              <td className="px-3 py-2 border border-default-200 dark:border-default-700">
+                                <Chip color={conn.type === 'udp' ? 'warning' : 'primary'} variant="flat" size="sm">{conn.type || '-'}</Chip>
+                              </td>
+                              <td className="px-3 py-2 border border-default-200 dark:border-default-700 max-w-[150px] truncate" title={conn.entryServer}>{conn.entryServer || '-'}</td>
+                              <td className="px-3 py-2 border border-default-200 dark:border-default-700 max-w-[150px] truncate" title={conn.forwarder}>{conn.forwarder || '-'}</td>
+                              <td className="px-3 py-2 border border-default-200 dark:border-default-700 whitespace-nowrap">↑{formatFlow(conn.upload)}</td>
+                              <td className="px-3 py-2 border border-default-200 dark:border-default-700 whitespace-nowrap">↓{formatFlow(conn.download)}</td>
+                              <td className="px-3 py-2 border border-default-200 dark:border-default-700">
+                                <Button
+                                  size="sm"
+                                  variant="flat"
+                                  color="primary"
+                                  onPress={() => {
+                                    navigator.clipboard?.writeText(conn.connectionId || '');
+                                    toast.success('连接ID已复制');
+                                  }}
+                                >
+                                  复制ID
+                                </Button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </ModalBody>
+                <ModalFooter>
+                  <Button variant="light" onPress={onClose}>关闭</Button>
+                  {currentConnForward && (
+                    <Button color="primary" onPress={() => handleConnections(currentConnForward)} isLoading={connLoading}>
+                      刷新
                     </Button>
                   )}
                 </ModalFooter>

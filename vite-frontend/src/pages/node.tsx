@@ -44,6 +44,8 @@ interface Node {
     uptime: number;
   } | null;
   copyLoading?: boolean;
+  tcpConnections?: number;
+  udpConnections?: number;
 }
 
 interface NodeForm {
@@ -759,6 +761,18 @@ export default function NodePage() {
                             : '-'
                           }
                         </div>
+                      </div>
+                    </div>
+
+                    {/* 连接统计 */}
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="text-center p-2 bg-default-50 dark:bg-default-100 rounded">
+                        <div className="text-default-600 mb-0.5">TCP连接</div>
+                        <div className="font-mono">{node.tcpConnections ?? '-'}</div>
+                      </div>
+                      <div className="text-center p-2 bg-default-50 dark:bg-default-100 rounded">
+                        <div className="text-default-600 mb-0.5">UDP连接</div>
+                        <div className="font-mono">{node.udpConnections ?? '-'}</div>
                       </div>
                     </div>
 

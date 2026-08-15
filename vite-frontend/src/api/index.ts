@@ -69,6 +69,9 @@ export const probeAllForwards = () => Network.post("/forward/probe-all");
 // 转发排序操作
 export const updateForwardOrder = (data: { forwards: Array<{ id: number; inx: number }> }) => Network.post("/forward/update-order", data);
 
+// 转发活跃连接统计
+export const getForwardConnections = (forwardId: number) => Network.post("/forward/connections", { forwardId });
+
 // 限速规则CRUD操作 - 全部使用POST请求
 export const createSpeedLimit = (data: any) => Network.post("/speed-limit/create", data);
 export const getSpeedLimitList = () => Network.post("/speed-limit/list");

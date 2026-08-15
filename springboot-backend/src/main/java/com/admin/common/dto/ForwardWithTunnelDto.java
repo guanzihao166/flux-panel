@@ -105,4 +105,26 @@ public class ForwardWithTunnelDto {
     private String chainNodeIds;
 
     private String balanceStrategy;
+
+    private String mode;
+
+    private String chainStrategy;
+
+    private Integer chainHops;
+
+    private String tunnelIds;
+
+    private String bandwidthMode;
+
+    private Long bandwidthUp;
+
+    private Long bandwidthDown;
+
+    private Long bandwidthCombined;
+
+    private Integer maxSourceIps;
+
+    private Integer maxConnPerIp;
+
+    private Long expireAt;
 }

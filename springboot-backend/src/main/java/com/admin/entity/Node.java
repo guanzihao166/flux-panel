@@ -1,6 +1,7 @@
 package com.admin.entity;
 
 import java.io.Serializable;
+import com.baomidou.mybatisplus.annotation.TableField;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
@@ -37,5 +38,11 @@ public class Node extends BaseEntity {
     private Integer tls;
 
     private Integer socks;
+
+    @TableField(exist = false)
+    private Long tcpConnections;
+
+    @TableField(exist = false)
+    private Long udpConnections;
 
 }

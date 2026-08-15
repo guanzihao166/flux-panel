@@ -49,6 +49,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
     /** 隧道类型常量 */
     private static final int TUNNEL_TYPE_PORT_FORWARD = 1;  // 端口转发
     private static final int TUNNEL_TYPE_TUNNEL_FORWARD = 2; // 隧道转发
+    private static final int TUNNEL_TYPE_FORWARD_ENDPOINT = 3; // 转发端点
 
     /** 隧道状态常量 */
     private static final int TUNNEL_STATUS_ACTIVE = 1;      // 启用状态
@@ -115,7 +116,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         }
 
         // 2. 验证隧道转发类型的必要参数
-        if (tunnelDto.getType() == TUNNEL_TYPE_TUNNEL_FORWARD) {
+        if (tunnelDto.getType() == TUNNEL_TYPE_TUNNEL_FORWARD || tunnelDto.getType() == TUNNEL_TYPE_FORWARD_ENDPOINT) {
             R tunnelForwardValidationResult = validateTunnelForwardCreate(tunnelDto);
             if (tunnelForwardValidationResult.getCode() != 0) {
                 return tunnelForwardValidationResult;
@@ -129,7 +130,8 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         if (routingValidation.getCode() != 0) return routingValidation;
 
         // 3. 验证入口节点和端口
-        NodeValidationResult inNodeValidation = validateInNode(tunnelDto);
+        NodeValidationResult inNodeValidation = tunnelDto.getType() == TUNNEL_TYPE_FORWARD_ENDPOINT
+                ? NodeValidationResult.success(null) : validateInNode(tunnelDto);
         if (inNodeValidation.isHasError()) {
             return R.err(inNodeValidation.getErrorMessage());
         }
@@ -138,7 +140,8 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         Tunnel tunnel = buildTunnelEntity(tunnelDto, inNodeValidation.getNode());
 
         // 5. 根据隧道类型设置出口参数
-        R outNodeSetupResult = setupOutNodeParameters(tunnel, tunnelDto, inNodeValidation.getNode().getServerIp());
+        Node inNodeForSetup = inNodeValidation.getNode();
+        R outNodeSetupResult = setupOutNodeParameters(tunnel, tunnelDto, inNodeForSetup == null ? "" : inNodeForSetup.getServerIp());
         if (outNodeSetupResult.getCode() != 0) {
             return outNodeSetupResult;
         }
@@ -223,6 +226,16 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
                     R r = forwardService.rebuildForwardRoute(forward, oldTopology, existingTunnel);
                     if (r.getCode() != 0){
                         err++;
+                    }
+                }
+            }
+            if (existingTunnel.getType() == TUNNEL_TYPE_FORWARD_ENDPOINT) {
+                for (Forward forward : forwardService.list()) {
+                    if (containsTunnelId(forward.getTunnelIds(), existingTunnel.getId())) {
+                        Tunnel primary = this.getById(forward.getTunnelId());
+                        if (primary == null) continue;
+                        R r = forwardService.rebuildForwardRouteForEndpoint(forward, oldTopology, existingTunnel, primary);
+                        if (r.getCode() != 0) err++;
                     }
                 }
             }
@@ -346,8 +359,9 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         if (maxFails != null && (maxFails < 1 || maxFails > 10)) return R.err("失败阈值必须在 1-10 之间");
         if (failTimeout != null && (failTimeout < 5 || failTimeout > 3600)) return R.err("故障恢复时间必须在 5-3600 秒之间");
         List<Long> outputs = parseNodeIds(outNodeIds);
-        if (type == TUNNEL_TYPE_TUNNEL_FORWARD && outputs.isEmpty() && legacyOutNodeId != null) outputs.add(legacyOutNodeId);
-        if (type == TUNNEL_TYPE_TUNNEL_FORWARD && outputs.isEmpty()) return R.err(ERROR_OUT_NODE_REQUIRED);
+        boolean routingType = type == TUNNEL_TYPE_TUNNEL_FORWARD || type == TUNNEL_TYPE_FORWARD_ENDPOINT;
+        if (routingType && outputs.isEmpty() && legacyOutNodeId != null) outputs.add(legacyOutNodeId);
+        if (routingType && outputs.isEmpty()) return R.err(ERROR_OUT_NODE_REQUIRED);
         List<Integer> weights = parseWeights(outNodeWeights, outputs.size());
         if (weights.size() != outputs.size()) return R.err("出口节点数量与权重数量不一致");
         Set<Long> seen = new HashSet<>();
@@ -366,7 +380,8 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
     private void applyRoutingConfig(Tunnel tunnel, String outNodeIds, String outNodeWeights, String chainNodeIds,
                                     String strategy, Integer maxFails, Integer failTimeout) {
         List<Long> outputs = parseNodeIds(outNodeIds);
-        if (tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD && outputs.isEmpty() && tunnel.getOutNodeId() != null) {
+        if ((tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD || tunnel.getType() == TUNNEL_TYPE_FORWARD_ENDPOINT)
+                && outputs.isEmpty() && tunnel.getOutNodeId() != null) {
             outputs.add(tunnel.getOutNodeId());
         }
         tunnel.setOutNodeIds(outputs.stream().map(String::valueOf).collect(Collectors.joining(",")));
@@ -390,6 +405,16 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
             try { result.add(Long.parseLong(item.trim())); } catch (NumberFormatException ignored) { }
         }
         return result;
+    }
+
+    private boolean containsTunnelId(String tunnelIds, Long id) {
+        if (StringUtils.isBlank(tunnelIds) || id == null) return false;
+        for (String item : tunnelIds.split(",")) {
+            try {
+                if (Long.parseLong(item.trim()) == id) return true;
+            } catch (NumberFormatException ignored) { }
+        }
+        return false;
     }
 
     private List<Integer> parseWeights(String value, int count) {
@@ -440,7 +465,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
 
         // 设置入口节点信息
         tunnel.setInNodeId(tunnelDto.getInNodeId());
-        tunnel.setInIp(inNode.getIp());
+        tunnel.setInIp(inNode == null ? null : inNode.getIp());
 
         // 设置流量计算类型
         tunnel.setFlow(tunnelDto.getFlow());
@@ -452,8 +477,8 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
             tunnel.setTrafficRatio(new BigDecimal("1.0"));
         }
 
-        // 设置协议类型（仅隧道转发需要）
-        if (tunnelDto.getType() == TUNNEL_TYPE_TUNNEL_FORWARD) {
+        // 设置协议类型（隧道转发和转发端点需要）
+        if (tunnelDto.getType() == TUNNEL_TYPE_TUNNEL_FORWARD || tunnelDto.getType() == TUNNEL_TYPE_FORWARD_ENDPOINT) {
             // 隧道转发时，设置协议类型，默认为tls
             String protocol = StrUtil.isNotBlank(tunnelDto.getProtocol()) ? tunnelDto.getProtocol() : "tls";
             tunnel.setProtocol(protocol);
@@ -487,7 +512,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
             // 端口转发：出口参数使用入口参数
             return setupPortForwardOutParameters(tunnel, tunnelDto, server_ip);
         } else {
-            // 隧道转发：需要验证出口参数
+            // 隧道转发和转发端点：需要验证出口参数
             return setupTunnelForwardOutParameters(tunnel, tunnelDto);
         }
     }
@@ -587,6 +612,12 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         if (forwardCount > 0) {
             String errorMsg = String.format(ERROR_FORWARDS_IN_USE, forwardCount);
             return R.err(errorMsg);
+        }
+
+        long endpointRefCount = forwardService.list(new QueryWrapper<Forward>().isNotNull("tunnel_ids")).stream()
+                .filter(f -> containsTunnelId(f.getTunnelIds(), tunnelId)).count();
+        if (endpointRefCount > 0) {
+            return R.err("该转发端点正在被 " + endpointRefCount + " 个转发使用，请先删除相关转发");
         }
 
         return R.ok();
@@ -710,6 +741,10 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         Tunnel tunnel = this.getById(tunnelId);
         if (tunnel == null) {
             return R.err(ERROR_TUNNEL_NOT_FOUND);
+        }
+
+        if (tunnel.getType() == TUNNEL_TYPE_FORWARD_ENDPOINT) {
+            return R.err("转发端点无需单独诊断，请在关联的转发上诊断");
         }
 
         // 2. 获取入口和出口节点信息

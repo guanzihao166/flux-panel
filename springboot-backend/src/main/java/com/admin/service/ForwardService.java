@@ -89,4 +89,6 @@ public interface ForwardService extends IService<Forward> {
     void updateForwardA(Forward forward);
 
     R rebuildForwardRoute(Forward forward, Tunnel oldTunnel, Tunnel newTunnel);
+
+    R rebuildForwardRouteForEndpoint(Forward forward, Tunnel oldEndpoint, Tunnel newEndpoint, Tunnel primaryTunnel);
 }

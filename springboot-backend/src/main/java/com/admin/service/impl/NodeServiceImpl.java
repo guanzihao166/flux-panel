@@ -106,6 +106,13 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
     @Override
     public R getAllNodes() {
         List<Node> nodeList = this.list();
+        for (Node node : nodeList) {
+            WebSocketServer.NodeRuntimeStats stats = WebSocketServer.getNodeRuntimeStats(node.getId());
+            if (stats != null) {
+                node.setTcpConnections(stats.getTcpConnections());
+                node.setUdpConnections(stats.getUdpConnections());
+            }
+        }
         hideNodeSecrets(nodeList);
         return R.ok(nodeList);
     }
@@ -363,7 +370,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         StringBuilder command = new StringBuilder();
 
         // 第一部分：下载安装脚本
-        command.append("curl -L https://github.com/guanzihao166/flux-panel/releases/download/1.6.0/install.sh")
+        command.append("curl -L https://github.com/guanzihao166/flux-panel/releases/download/1.7.0/install.sh")
                .append(" -o ./install.sh && chmod +x ./install.sh && ");
 
         // 处理服务器地址，如果是IPv6需要添加方括号

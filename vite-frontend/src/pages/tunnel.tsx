@@ -23,7 +23,7 @@ import {
 interface Tunnel {
   id: number;
   name: string;
-  type: number; // 1: 端口转发, 2: 隧道转发
+  type: number; // 1: 端口转发, 2: 隧道转发, 3: 转发端点
   inNodeId: number;
   outNodeId?: number;
   inIp: string;
@@ -187,12 +187,12 @@ export default function TunnelPage() {
       newErrors.trafficRatio = '流量倍率必须在0.0-100.0之间';
     }
 
-    // 隧道转发时的验证
-    if (form.type === 2) {
+    // 隧道转发和转发端点时的验证
+    if (form.type === 2 || form.type === 3) {
       const outputIds = form.outNodeIds.split(',').map(v => Number(v.trim())).filter(Boolean);
       if (outputIds.length === 0) {
         newErrors.outNodeIds = '请至少选择一个出口节点';
-      } else if (form.inNodeId && outputIds.includes(form.inNodeId)) {
+      } else if (form.type === 2 && form.inNodeId && outputIds.includes(form.inNodeId)) {
         newErrors.outNodeIds = '入口节点不能同时作为出口节点';
       }
 
@@ -338,7 +338,7 @@ export default function TunnelPage() {
         toast.error(response.msg || '诊断失败');
         setDiagnosisResult({
           tunnelName: tunnel.name,
-          tunnelType: tunnel.type === 1 ? '端口转发' : '隧道转发',
+          tunnelType: getTypeLabel(tunnel.type),
           timestamp: Date.now(),
           results: [{
             success: false,
@@ -356,7 +356,7 @@ export default function TunnelPage() {
       toast.error('网络错误，请重试');
       setDiagnosisResult({
         tunnelName: tunnel.name,
-        tunnelType: tunnel.type === 1 ? '端口转发' : '隧道转发',
+        tunnelType: getTypeLabel(tunnel.type),
         timestamp: Date.now(),
         results: [{
           success: false,
@@ -392,6 +392,13 @@ export default function TunnelPage() {
     return node ? node.name : `节点${nodeId}`;
   };
 
+  const getTypeLabel = (type: number): string => {
+    if (type === 1) return '端口转发';
+    if (type === 2) return '隧道转发';
+    if (type === 3) return '转发端点';
+    return '未知';
+  };
+
   // 获取状态显示
   const getStatusDisplay = (status: number) => {
     switch (status) {
@@ -411,6 +418,8 @@ export default function TunnelPage() {
         return { text: '端口转发', color: 'primary' };
       case 2:
         return { text: '隧道转发', color: 'secondary' };
+      case 3:
+        return { text: '转发端点', color: 'warning' };
       default:
         return { text: '未知', color: 'default' };
     }
@@ -680,6 +689,7 @@ export default function TunnelPage() {
                     >
                       <SelectItem key="1">端口转发</SelectItem>
                       <SelectItem key="2">隧道转发</SelectItem>
+                      <SelectItem key="3">转发端点</SelectItem>
                     </Select>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -722,76 +732,90 @@ export default function TunnelPage() {
                     </div>
 
                     <Divider />
-                    <h3 className="text-lg font-semibold">入口配置</h3>
 
-                    <Select
-                      label="入口节点"
-                      placeholder="请选择入口节点"
-                      selectedKeys={form.inNodeId ? [form.inNodeId.toString()] : []}
-                      onSelectionChange={(keys) => {
-                        const selectedKey = Array.from(keys)[0] as string;
-                        if (selectedKey) {
-                          setForm(prev => ({ ...prev, inNodeId: parseInt(selectedKey) }));
-                        }
-                      }}
-                      isInvalid={!!errors.inNodeId}
-                      errorMessage={errors.inNodeId}
-                      variant="bordered"
-                      isDisabled={isEdit}
-                    >
-                      {nodes.map((node) => (
-                        <SelectItem
-                          key={node.id}
-                          textValue={`${node.name} (${node.status === 1 ? '在线' : '离线'})`}
+                    {form.type === 3 && (
+                      <Alert
+                        color="primary"
+                        variant="flat"
+                        title="转发端点"
+                        description="转发端点不占用入口端口，仅作为单跳或链式转发时的一组出口目标使用。"
+                      />
+                    )}
+
+                    {form.type !== 3 && (
+                      <>
+                        <h3 className="text-lg font-semibold">入口配置</h3>
+
+                        <Select
+                          label="入口节点"
+                          placeholder="请选择入口节点"
+                          selectedKeys={form.inNodeId ? [form.inNodeId.toString()] : []}
+                          onSelectionChange={(keys) => {
+                            const selectedKey = Array.from(keys)[0] as string;
+                            if (selectedKey) {
+                              setForm(prev => ({ ...prev, inNodeId: parseInt(selectedKey) }));
+                            }
+                          }}
+                          isInvalid={!!errors.inNodeId}
+                          errorMessage={errors.inNodeId}
+                          variant="bordered"
+                          isDisabled={isEdit}
                         >
-                          <div className="flex items-center justify-between">
-                            <span>{node.name}</span>
-                            <Chip
-                              color={node.status === 1 ? 'success' : 'danger'}
-                              variant="flat"
-                              size="sm"
+                          {nodes.map((node) => (
+                            <SelectItem
+                              key={node.id}
+                              textValue={`${node.name} (${node.status === 1 ? '在线' : '离线'})`}
                             >
-                              {node.status === 1 ? '在线' : '离线'}
-                            </Chip>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </Select>
+                              <div className="flex items-center justify-between">
+                                <span>{node.name}</span>
+                                <Chip
+                                  color={node.status === 1 ? 'success' : 'danger'}
+                                  variant="flat"
+                                  size="sm"
+                                >
+                                  {node.status === 1 ? '在线' : '离线'}
+                                </Chip>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </Select>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <Input
-                        label="TCP监听地址"
-                        placeholder="请输入TCP监听地址"
-                        value={form.tcpListenAddr}
-                        onChange={(e) => setForm(prev => ({ ...prev, tcpListenAddr: e.target.value }))}
-                        isInvalid={!!errors.tcpListenAddr}
-                        errorMessage={errors.tcpListenAddr}
-                        variant="bordered"
-                        startContent={
-                          <div className="pointer-events-none flex items-center">
-                            <span className="text-default-400 text-small">TCP</span>
-                          </div>
-                        }
-                      />
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <Input
+                            label="TCP监听地址"
+                            placeholder="请输入TCP监听地址"
+                            value={form.tcpListenAddr}
+                            onChange={(e) => setForm(prev => ({ ...prev, tcpListenAddr: e.target.value }))}
+                            isInvalid={!!errors.tcpListenAddr}
+                            errorMessage={errors.tcpListenAddr}
+                            variant="bordered"
+                            startContent={
+                              <div className="pointer-events-none flex items-center">
+                                <span className="text-default-400 text-small">TCP</span>
+                              </div>
+                            }
+                          />
 
-                      <Input
-                        label="UDP监听地址"
-                        placeholder="请输入UDP监听地址"
-                        value={form.udpListenAddr}
-                        onChange={(e) => setForm(prev => ({ ...prev, udpListenAddr: e.target.value }))}
-                        isInvalid={!!errors.udpListenAddr}
-                        errorMessage={errors.udpListenAddr}
-                        variant="bordered"
-                        startContent={
-                          <div className="pointer-events-none flex items-center">
-                            <span className="text-default-400 text-small">UDP</span>
-                          </div>
-                        }
-                      />
-                    </div>
+                          <Input
+                            label="UDP监听地址"
+                            placeholder="请输入UDP监听地址"
+                            value={form.udpListenAddr}
+                            onChange={(e) => setForm(prev => ({ ...prev, udpListenAddr: e.target.value }))}
+                            isInvalid={!!errors.udpListenAddr}
+                            errorMessage={errors.udpListenAddr}
+                            variant="bordered"
+                            startContent={
+                              <div className="pointer-events-none flex items-center">
+                                <span className="text-default-400 text-small">UDP</span>
+                              </div>
+                            }
+                          />
+                        </div>
+                      </>
+                    )}
 
-                    {/* 隧道转发时显示出口网卡配置 */}
-                    {form.type === 2 && (
+                    {/* 隧道转发和转发端点时显示出口网卡配置 */}
+                    {(form.type === 2 || form.type === 3) && (
                       <Input
                         label="出口网卡名或IP"
                         placeholder="请输入出口网卡名或IP"
@@ -803,8 +827,8 @@ export default function TunnelPage() {
                       />
                     )}
 
-                    {/* 隧道转发时显示出口配置 */}
-                    {form.type === 2 && (
+                    {/* 隧道转发和转发端点时显示出口配置 */}
+                    {(form.type === 2 || form.type === 3) && (
                       <>
                         <Divider />
                         <h3 className="text-lg font-semibold">出口配置</h3>
@@ -1013,7 +1037,7 @@ export default function TunnelPage() {
                         variant="flat"
                         size="sm"
                       >
-                        {currentDiagnosisTunnel.type === 1 ? '端口转发' : '隧道转发'}
+                        {getTypeLabel(currentDiagnosisTunnel.type)}
                       </Chip>
                     </div>
                   )}

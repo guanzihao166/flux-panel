@@ -26,11 +26,14 @@ import (
 
 // SystemInfo 系统信息结构体
 type SystemInfo struct {
-	Uptime           uint64  `json:"uptime"`            // 开机时间	（秒）
-	BytesReceived    uint64  `json:"bytes_received"`    // 接收字节数
-	BytesTransmitted uint64  `json:"bytes_transmitted"` // 发送字节数
-	CPUUsage         float64 `json:"cpu_usage"`         // CPU使用率（百分比）
-	MemoryUsage      float64 `json:"memory_usage"`      // 内存使用率（百分比）
+	Uptime           uint64                   `json:"uptime"`                    // 开机时间	（秒）
+	BytesReceived    uint64                   `json:"bytes_received"`            // 接收字节数
+	BytesTransmitted uint64                   `json:"bytes_transmitted"`         // 发送字节数
+	CPUUsage         float64                  `json:"cpu_usage"`                 // CPU使用率（百分比）
+	MemoryUsage      float64                  `json:"memory_usage"`              // 内存使用率（百分比）
+	TCPConnections   int                      `json:"tcpConnections"`            // TCP连接数
+	UDPConnections   int                      `json:"udpConnections"`            // UDP连接数
+	ConnectionStats  []service.ConnectionInfo `json:"connectionStats,omitempty"` // 活跃连接详情
 }
 
 // NetworkStats 网络统计信息
@@ -299,6 +302,7 @@ func (w *WebSocketReporter) collectSystemInfo() SystemInfo {
 	networkStats := getNetworkStats()
 	cpuInfo := getCPUInfo()
 	memoryInfo := getMemoryInfo()
+	tcpCount, udpCount := getConnCounts()
 
 	return SystemInfo{
 		Uptime:           getUptime(),
@@ -306,6 +310,9 @@ func (w *WebSocketReporter) collectSystemInfo() SystemInfo {
 		BytesTransmitted: networkStats.BytesTransmitted,
 		CPUUsage:         cpuInfo.Usage,
 		MemoryUsage:      memoryInfo.Usage,
+		TCPConnections:   tcpCount,
+		UDPConnections:   udpCount,
+		ConnectionStats:  service.ActiveConnectionStats(),
 	}
 }
 
@@ -1010,6 +1017,35 @@ func getNetworkStats() NetworkStats {
 	}
 
 	return stats
+}
+
+func getConnCounts() (int, int) {
+	tcp := countProcConn("/proc/net/tcp") + countProcConn("/proc/net/tcp6")
+	udp := countProcConn("/proc/net/udp") + countProcConn("/proc/net/udp6")
+	return tcp, udp
+}
+
+func countProcConn(path string) int {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	lines := strings.Split(string(data), "\n")
+	count := 0
+	for i, line := range lines {
+		if i == 0 || strings.TrimSpace(line) == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			continue
+		}
+		if strings.Contains(path, "tcp") && fields[3] != "01" {
+			continue
+		}
+		count++
+	}
+	return count
 }
 
 // getCPUInfo 获取CPU信息

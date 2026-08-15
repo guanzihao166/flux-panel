@@ -2,14 +2,17 @@ package com.admin.controller;
 
 import com.admin.common.aop.LogAnnotation;
 import com.admin.common.annotation.RequireRole;
+import com.admin.common.dto.ConnectionStatDto;
 import com.admin.common.dto.ForwardDto;
 import com.admin.common.dto.ForwardUpdateDto;
 import com.admin.common.lang.R;
+import com.admin.common.utils.WebSocketServer;
 import com.admin.service.ForwardService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -102,6 +105,14 @@ public class ForwardController extends BaseController {
      * @param params 包含forwards数组的参数，每个元素包含id和inx
      * @return 更新结果
      */
+    @LogAnnotation
+    @PostMapping("/connections")
+    public R connections(@RequestBody Map<String, Object> params) {
+        Long id = Long.valueOf(params.get("forwardId").toString());
+        List<ConnectionStatDto> connections = WebSocketServer.getForwardConnections(id);
+        return R.ok(connections);
+    }
+
     @LogAnnotation
     @PostMapping("/update-order")
     public R updateForwardOrder(@RequestBody Map<String, Object> params) {

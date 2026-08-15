@@ -1,12 +1,14 @@
 package com.admin.common.utils;
 
 
+import com.admin.common.dto.ConnectionStatDto;
 import com.admin.common.dto.GostConfigDto;
 import com.admin.common.dto.GostDto;
 import com.admin.common.task.CheckGostConfigAsync;
 import com.admin.entity.Node;
 import com.admin.service.NodeService;
 import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -17,11 +19,15 @@ import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import javax.annotation.Resource;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.UUID;
 
 
@@ -45,6 +51,9 @@ public class WebSocketServer extends TextWebSocketHandler {
 
     // 缓存加密器实例，避免重复创建
     private static final ConcurrentHashMap<String, AESCrypto> cryptoCache = new ConcurrentHashMap<>();
+
+    // 节点运行时统计（系统信息和活跃连接）
+    private static final ConcurrentHashMap<Long, NodeRuntimeStats> nodeRuntimeStats = new ConcurrentHashMap<>();
 
     /**
      * 加密消息包装器
@@ -77,6 +86,7 @@ public class WebSocketServer extends TextWebSocketHandler {
                 String decryptedPayload = decryptMessageIfNeeded(message.getPayload(), nodeSecret);
 
                 if (decryptedPayload.contains("memory_usage")){
+                    updateNodeRuntimeStats(id, decryptedPayload);
                     // 先发送确认消息
                     sendToUser(session, "{\"type\":\"call\"}", nodeSecret);
                 }else if (decryptedPayload.contains("requestId")) {
@@ -491,5 +501,59 @@ public class WebSocketServer extends TextWebSocketHandler {
         }
     }
 
+    private void updateNodeRuntimeStats(String nodeIdStr, String payload) {
+        try {
+            Long nodeId = Long.valueOf(nodeIdStr);
+            JSONObject obj = JSONObject.parseObject(payload);
+            NodeRuntimeStats stats = nodeRuntimeStats.computeIfAbsent(nodeId, k -> new NodeRuntimeStats());
+            stats.tcpConnections.set(obj.getLongValue("tcpConnections"));
+            stats.udpConnections.set(obj.getLongValue("udpConnections"));
+
+            Map<String, List<ConnectionStatDto>> byService = new ConcurrentHashMap<>();
+            JSONArray connections = obj.getJSONArray("connectionStats");
+            if (connections != null) {
+                for (int i = 0; i < connections.size(); i++) {
+                    ConnectionStatDto dto = connections.getJSONObject(i).toJavaObject(ConnectionStatDto.class);
+                    dto.setNodeId(nodeId);
+                    String serviceName = StringUtils.defaultString(dto.getServiceName());
+                    byService.computeIfAbsent(serviceName, k -> new ArrayList<>()).add(dto);
+                }
+            }
+            stats.connectionStats.clear();
+            stats.connectionStats.putAll(byService);
+        } catch (Exception e) {
+            log.info("解析节点统计失败: {}", e.getMessage());
+        }
+    }
+
+    public static NodeRuntimeStats getNodeRuntimeStats(Long nodeId) {
+        return nodeId == null ? null : nodeRuntimeStats.get(nodeId);
+    }
+
+    public static List<ConnectionStatDto> getForwardConnections(Long forwardId) {
+        List<ConnectionStatDto> result = new ArrayList<>();
+        if (forwardId == null) return result;
+        String prefix = forwardId + "_";
+        for (NodeRuntimeStats stats : nodeRuntimeStats.values()) {
+            for (List<ConnectionStatDto> connections : stats.connectionStats.values()) {
+                for (ConnectionStatDto dto : connections) {
+                    if (dto.getServiceName() != null && dto.getServiceName().startsWith(prefix)) {
+                        result.add(dto);
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    public static class NodeRuntimeStats {
+        private final AtomicLong tcpConnections = new AtomicLong(0);
+        private final AtomicLong udpConnections = new AtomicLong(0);
+        private final ConcurrentHashMap<String, List<ConnectionStatDto>> connectionStats = new ConcurrentHashMap<>();
+
+        public long getTcpConnections() { return tcpConnections.get(); }
+        public long getUdpConnections() { return udpConnections.get(); }
+        public Map<String, List<ConnectionStatDto>> getConnectionStats() { return connectionStats; }
+    }
 
 }

@@ -10,8 +10,10 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-gost/core/admission"
@@ -41,6 +43,7 @@ type options struct {
 	observer       observer.Observer
 	observerPeriod time.Duration
 	logger         logger.Logger
+	metadata       map[string]any
 }
 
 var isTls = 0
@@ -53,10 +56,10 @@ var needWrap = false
 
 // SetProtocolBlock sets protocol blocking switches and recomputes wrapper need
 func SetProtocolBlock(httpOn int, tlsOn int, socksOn int) {
-    isHttp = httpOn
-    isTls = tlsOn
-    isSocks = socksOn
-    needWrap = isTls+isSocks+isHttp > 0
+	isHttp = httpOn
+	isTls = tlsOn
+	isSocks = socksOn
+	needWrap = isTls+isSocks+isHttp > 0
 }
 
 type Option func(opts *options)
@@ -121,12 +124,20 @@ func LoggerOption(logger logger.Logger) Option {
 	}
 }
 
+func MetadataOption(metadata map[string]any) Option {
+	return func(opts *options) {
+		opts.metadata = metadata
+	}
+}
+
 type defaultService struct {
-	name     string
-	listener listener.Listener
-	handler  handler.Handler
-	status   *Status
-	options  options
+	name      string
+	listener  listener.Listener
+	handler   handler.Handler
+	status    *Status
+	options   options
+	guard     *connGuard
+	bandwidth *bandwidthControl
 }
 
 func NewService(name string, ln listener.Listener, h handler.Handler, opts ...Option) service.Service {
@@ -144,6 +155,8 @@ func NewService(name string, ln listener.Listener, h handler.Handler, opts ...Op
 			events:     make([]Event, 0, MaxEventSize),
 			stats:      options.stats,
 		},
+		guard:     newConnGuard(options.metadata),
+		bandwidth: newBandwidthControl(options.metadata),
 	}
 	s.setState(StateRunning)
 
@@ -281,6 +294,13 @@ func (s *defaultService) Serve() error {
 				conn = wrapConnPDetection(conn)
 			}
 
+			tracked := s.trackConnection(conn, clientAddr, clientIP)
+			if tracked == nil {
+				return
+			}
+			conn = tracked.conn
+			defer tracked.close()
+
 			if err := s.handler.Handle(ctx, conn); err != nil {
 				log.Error(err)
 				if v := xmetrics.GetCounter(xmetrics.MetricServiceHandlerErrorsCounter,
@@ -293,6 +313,345 @@ func (s *defaultService) Serve() error {
 			}
 		}()
 	}
+}
+
+func (s *defaultService) trackConnection(conn net.Conn, clientAddr, clientIP string) *trackedConn {
+	if metadataString(s.options.metadata, "flux_forward_id") == "" {
+		return nil
+	}
+	if !s.guard.admit(clientIP) {
+		conn.Close()
+		return nil
+	}
+	typ := "tcp"
+	if strings.HasSuffix(s.name, "_udp") {
+		typ = "udp"
+	}
+	target := metadataString(s.options.metadata, "flux_target")
+	if target == "" {
+		target = "-"
+	}
+	realTarget := metadataString(s.options.metadata, "flux_real_target")
+	if realTarget == "" {
+		realTarget = target
+	}
+	t := &trackedConn{
+		id:          xid.New().String(),
+		serviceName: s.name,
+		conn:        conn,
+		bw:          s.bandwidth,
+		guard:       s.guard,
+		guardIP:     clientIP,
+		info: ConnectionInfo{
+			ConnectionId: "",
+			StartTime:    time.Now().UnixMilli(),
+			ClientAddr:   clientAddr,
+			TargetAddr:   target,
+			RealTarget:   realTarget,
+			LocalAddr:    conn.LocalAddr().String(),
+			Type:         typ,
+			EntryServer:  metadataString(s.options.metadata, "flux_entry_server"),
+			Forwarder:    metadataString(s.options.metadata, "flux_forwarder"),
+			ServiceName:  s.name,
+		},
+	}
+	t.info.ConnectionId = t.id
+	t.conn = &countingConn{Conn: conn, upload: &t.upload, download: &t.download, bw: s.bandwidth}
+	connRegistry.add(s.name, t)
+	return t
+}
+
+type ConnectionInfo struct {
+	ConnectionId string `json:"connectionId"`
+	StartTime    int64  `json:"startTime"`
+	ClientAddr   string `json:"clientAddr"`
+	TargetAddr   string `json:"targetAddr"`
+	RealTarget   string `json:"realTarget"`
+	LocalAddr    string `json:"localAddr"`
+	Type         string `json:"type"`
+	EntryServer  string `json:"entryServer"`
+	Forwarder    string `json:"forwarder"`
+	Upload       int64  `json:"upload"`
+	Download     int64  `json:"download"`
+	ServiceName  string `json:"serviceName"`
+}
+
+type trackedConn struct {
+	id          string
+	serviceName string
+	conn        net.Conn
+	info        ConnectionInfo
+	upload      atomic.Int64
+	download    atomic.Int64
+	bw          *bandwidthControl
+	guard       *connGuard
+	guardIP     string
+}
+
+func (t *trackedConn) close() {
+	t.conn.Close()
+	if t.guard != nil {
+		t.guard.release(t.guardIP)
+	}
+	connRegistry.remove(t.serviceName, t.id)
+}
+
+func (t *trackedConn) snapshot() ConnectionInfo {
+	info := t.info
+	info.Upload = t.upload.Load()
+	info.Download = t.download.Load()
+	return info
+}
+
+type connectionRegistry struct {
+	mu     sync.Mutex
+	active map[string]map[string]*trackedConn
+}
+
+var connRegistry = &connectionRegistry{active: make(map[string]map[string]*trackedConn)}
+
+func (r *connectionRegistry) add(serviceName string, t *trackedConn) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.active[serviceName] == nil {
+		r.active[serviceName] = make(map[string]*trackedConn)
+	}
+	r.active[serviceName][t.id] = t
+}
+
+func (r *connectionRegistry) remove(serviceName, id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if m := r.active[serviceName]; m != nil {
+		delete(m, id)
+		if len(m) == 0 {
+			delete(r.active, serviceName)
+		}
+	}
+}
+
+func (r *connectionRegistry) snapshot() []ConnectionInfo {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([]ConnectionInfo, 0)
+	for _, m := range r.active {
+		for _, t := range m {
+			result = append(result, t.snapshot())
+		}
+	}
+	return result
+}
+
+func ActiveConnectionStats() []ConnectionInfo {
+	return connRegistry.snapshot()
+}
+
+type countingConn struct {
+	net.Conn
+	upload   *atomic.Int64
+	download *atomic.Int64
+	bw       *bandwidthControl
+}
+
+func (c *countingConn) Read(p []byte) (int, error) {
+	n, err := c.Conn.Read(p)
+	if n > 0 {
+		c.bw.takeUpload(int64(n))
+		c.upload.Add(int64(n))
+	}
+	return n, err
+}
+
+func (c *countingConn) Write(p []byte) (int, error) {
+	c.bw.takeDownload(int64(len(p)))
+	n, err := c.Conn.Write(p)
+	if n > 0 {
+		c.download.Add(int64(n))
+	}
+	return n, err
+}
+
+func (c *countingConn) ClientAddr() net.Addr {
+	if ca, ok := c.Conn.(xnet.ClientAddr); ok {
+		return ca.ClientAddr()
+	}
+	return c.Conn.RemoteAddr()
+}
+
+type connGuard struct {
+	mu           sync.Mutex
+	ips          map[string]int
+	maxSourceIps int
+	maxConnPerIp int
+	expireAt     int64
+}
+
+func newConnGuard(metadata map[string]any) *connGuard {
+	return &connGuard{
+		ips:          make(map[string]int),
+		maxSourceIps: metadataInt(metadata, "flux_max_source_ips"),
+		maxConnPerIp: metadataInt(metadata, "flux_max_conn_per_ip"),
+		expireAt:     metadataInt64(metadata, "flux_expire_at"),
+	}
+}
+
+func (g *connGuard) admit(ip string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.expireAt > 0 && time.Now().UnixMilli() >= g.expireAt {
+		return false
+	}
+	if ip == "" {
+		ip = "unknown"
+	}
+	if g.maxSourceIps > 0 && g.ips[ip] == 0 && len(g.ips) >= g.maxSourceIps {
+		return false
+	}
+	if g.maxConnPerIp > 0 && g.ips[ip] >= g.maxConnPerIp {
+		return false
+	}
+	g.ips[ip]++
+	return true
+}
+
+func (g *connGuard) release(ip string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if ip == "" {
+		ip = "unknown"
+	}
+	if count := g.ips[ip]; count > 1 {
+		g.ips[ip] = count - 1
+	} else {
+		delete(g.ips, ip)
+	}
+}
+
+type bandwidthControl struct {
+	up       *tokenBucket
+	down     *tokenBucket
+	combined *tokenBucket
+}
+
+func newBandwidthControl(metadata map[string]any) *bandwidthControl {
+	mode := metadataString(metadata, "flux_bandwidth_mode")
+	up := metadataInt64(metadata, "flux_bandwidth_up")
+	down := metadataInt64(metadata, "flux_bandwidth_down")
+	combined := metadataInt64(metadata, "flux_bandwidth_combined")
+	bw := &bandwidthControl{}
+	if mode == "separate" {
+		bw.up = newTokenBucket(up)
+		bw.down = newTokenBucket(down)
+	}
+	if mode == "combined" {
+		bw.combined = newTokenBucket(combined)
+	}
+	return bw
+}
+
+func (b *bandwidthControl) takeUpload(n int64) {
+	if b == nil || n <= 0 {
+		return
+	}
+	if b.combined != nil {
+		b.combined.take(n)
+	} else if b.up != nil {
+		b.up.take(n)
+	}
+}
+
+func (b *bandwidthControl) takeDownload(n int64) {
+	if b == nil || n <= 0 {
+		return
+	}
+	if b.combined != nil {
+		b.combined.take(n)
+	} else if b.down != nil {
+		b.down.take(n)
+	}
+}
+
+type tokenBucket struct {
+	mu     sync.Mutex
+	rate   float64
+	tokens float64
+	last   time.Time
+}
+
+func newTokenBucket(rate int64) *tokenBucket {
+	return &tokenBucket{rate: float64(rate), last: time.Now()}
+}
+
+func (b *tokenBucket) take(n int64) {
+	if b.rate <= 0 || n <= 0 {
+		return
+	}
+	b.mu.Lock()
+	now := time.Now()
+	elapsed := now.Sub(b.last).Seconds()
+	b.tokens += elapsed * b.rate
+	if b.tokens > b.rate {
+		b.tokens = b.rate
+	}
+	b.last = now
+	need := float64(n)
+	if b.tokens < need {
+		sleep := time.Duration((need - b.tokens) / b.rate * float64(time.Second))
+		b.mu.Unlock()
+		time.Sleep(sleep)
+		b.mu.Lock()
+		b.tokens = 0
+		b.last = time.Now()
+	} else {
+		b.tokens -= need
+	}
+	b.mu.Unlock()
+}
+
+func metadataString(metadata map[string]any, key string) string {
+	if metadata == nil {
+		return ""
+	}
+	if v, ok := metadata[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+func metadataInt(metadata map[string]any, key string) int {
+	if metadata == nil {
+		return 0
+	}
+	switch v := metadata[key].(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	case string:
+		n, _ := strconv.Atoi(v)
+		return n
+	}
+	return 0
+}
+
+func metadataInt64(metadata map[string]any, key string) int64 {
+	if metadata == nil {
+		return 0
+	}
+	switch v := metadata[key].(type) {
+	case int:
+		return int64(v)
+	case int64:
+		return v
+	case float64:
+		return int64(v)
+	case string:
+		n, _ := strconv.ParseInt(v, 10, 64)
+		return n
+	}
+	return 0
 }
 
 func (s *defaultService) Status() *Status {

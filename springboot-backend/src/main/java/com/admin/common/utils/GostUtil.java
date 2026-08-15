@@ -40,10 +40,16 @@ public class GostUtil {
 
     public static GostDto AddService(Long node_id, String name, Integer in_port, Integer limiter, String remoteAddr,
                                      Integer fow_type, Tunnel tunnel, String strategy, String interfaceName, String weights) {
+        return AddService(node_id, name, in_port, limiter, remoteAddr, fow_type, tunnel, strategy, interfaceName, weights, null);
+    }
+
+    public static GostDto AddService(Long node_id, String name, Integer in_port, Integer limiter, String remoteAddr,
+                                     Integer fow_type, Tunnel tunnel, String strategy, String interfaceName, String weights,
+                                     JSONObject meta) {
         JSONArray services = new JSONArray();
         String[] protocols = {"tcp", "udp"};
         for (String protocol : protocols) {
-            JSONObject service = createServiceConfig(name, in_port, limiter, remoteAddr, protocol, fow_type, tunnel, strategy, interfaceName, weights);
+            JSONObject service = createServiceConfig(name, in_port, limiter, remoteAddr, protocol, fow_type, tunnel, strategy, interfaceName, weights, meta);
             services.add(service);
         }
         return WebSocketServer.send_msg(node_id, services, "AddService");
@@ -55,10 +61,16 @@ public class GostUtil {
 
     public static GostDto UpdateService(Long node_id, String name, Integer in_port, Integer limiter, String remoteAddr,
                                         Integer fow_type, Tunnel tunnel, String strategy, String interfaceName, String weights) {
+        return UpdateService(node_id, name, in_port, limiter, remoteAddr, fow_type, tunnel, strategy, interfaceName, weights, null);
+    }
+
+    public static GostDto UpdateService(Long node_id, String name, Integer in_port, Integer limiter, String remoteAddr,
+                                        Integer fow_type, Tunnel tunnel, String strategy, String interfaceName, String weights,
+                                        JSONObject meta) {
         JSONArray services = new JSONArray();
         String[] protocols = {"tcp", "udp"};
         for (String protocol : protocols) {
-            JSONObject service = createServiceConfig(name, in_port, limiter, remoteAddr, protocol, fow_type, tunnel, strategy, interfaceName, weights);
+            JSONObject service = createServiceConfig(name, in_port, limiter, remoteAddr, protocol, fow_type, tunnel, strategy, interfaceName, weights, meta);
             services.add(service);
         }
         return WebSocketServer.send_msg(node_id, services, "UpdateService");
@@ -287,28 +299,54 @@ public class GostUtil {
     public static GostDto AddChains(Long nodeId, String name, List<String> hopAddresses, String protocol,
                                     String interfaceName, String strategy, List<Integer> weights,
                                     Integer maxFails, Integer failTimeout) {
-        JSONObject data = buildChainConfig(name, hopAddresses, protocol, interfaceName, strategy, weights, maxFails, failTimeout);
+        List<List<Integer>> perHopWeights = new ArrayList<>();
+        for (String ignored : hopAddresses) perHopWeights.add(weights);
+        return AddChainsWithHopWeights(nodeId, name, hopAddresses, protocol, interfaceName, strategy, perHopWeights, maxFails, failTimeout);
+    }
+
+    public static GostDto AddChainsWithHopWeights(Long nodeId, String name, List<String> hopAddresses, String protocol,
+                                    String interfaceName, String strategy, List<List<Integer>> hopWeights,
+                                    Integer maxFails, Integer failTimeout) {
+        JSONObject data = buildChainConfigWithHopWeights(name, hopAddresses, protocol, interfaceName, strategy, hopWeights, maxFails, failTimeout);
         return WebSocketServer.send_msg(nodeId, data, "AddChains");
     }
 
     public static GostDto UpdateChains(Long nodeId, String name, List<String> hopAddresses, String protocol,
                                        String interfaceName, String strategy, List<Integer> weights,
                                        Integer maxFails, Integer failTimeout) {
+        List<List<Integer>> perHopWeights = new ArrayList<>();
+        for (String ignored : hopAddresses) perHopWeights.add(weights);
+        return UpdateChainsWithHopWeights(nodeId, name, hopAddresses, protocol, interfaceName, strategy, perHopWeights, maxFails, failTimeout);
+    }
+
+    public static GostDto UpdateChainsWithHopWeights(Long nodeId, String name, List<String> hopAddresses, String protocol,
+                                       String interfaceName, String strategy, List<List<Integer>> hopWeights,
+                                       Integer maxFails, Integer failTimeout) {
         JSONObject req = new JSONObject();
         req.put("chain", name + "_chains");
-        req.put("data", buildChainConfig(name, hopAddresses, protocol, interfaceName, strategy, weights, maxFails, failTimeout));
+        req.put("data", buildChainConfigWithHopWeights(name, hopAddresses, protocol, interfaceName, strategy, hopWeights, maxFails, failTimeout));
         return WebSocketServer.send_msg(nodeId, req, "UpdateChains");
     }
 
     private static JSONObject buildChainConfig(String name, List<String> hopAddresses, String protocol,
                                                String interfaceName, String strategy, List<Integer> weights,
                                                Integer maxFails, Integer failTimeout) {
+        List<List<Integer>> perHopWeights = new ArrayList<>();
+        for (String ignored : hopAddresses) perHopWeights.add(weights);
+        return buildChainConfigWithHopWeights(name, hopAddresses, protocol, interfaceName, strategy, perHopWeights, maxFails, failTimeout);
+    }
+
+    private static JSONObject buildChainConfigWithHopWeights(String name, List<String> hopAddresses, String protocol,
+                                               String interfaceName, String strategy, List<List<Integer>> hopWeights,
+                                               Integer maxFails, Integer failTimeout) {
         JSONArray hops = new JSONArray();
         for (int hopIndex = 0; hopIndex < hopAddresses.size(); hopIndex++) {
             String alternatives = hopAddresses.get(hopIndex);
             JSONArray nodes = new JSONArray();
             String[] addresses = alternatives.split(",");
-            List<Integer> normalizedWeights = normalizeWeights(weights, addresses.length);
+            List<Integer> normalizedWeights = normalizeWeights(
+                    hopWeights != null && hopIndex < hopWeights.size() ? joinWeights(hopWeights.get(hopIndex)) : null,
+                    addresses.length);
             int sequence = 1;
             for (int i = 0; i < addresses.length; i++) {
                 int copies = "wrr".equals(strategy) ? Math.min(normalizedWeights.get(i), 100) : 1;
@@ -344,6 +382,16 @@ public class GostUtil {
         return data;
     }
 
+    private static String joinWeights(List<Integer> weights) {
+        if (weights == null || weights.isEmpty()) return null;
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < weights.size(); i++) {
+            if (i > 0) sb.append(",");
+            sb.append(weights.get(i));
+        }
+        return sb.toString();
+    }
+
     public static GostDto DeleteChains(Long node_id, String name) {
         JSONObject data = new JSONObject();
         data.put("chain", name + "_chains");
@@ -359,7 +407,7 @@ public class GostUtil {
         return data;
     }
 
-    private static JSONObject createServiceConfig(String name, Integer in_port, Integer limiter, String remoteAddr, String protocol, Integer fow_type, Tunnel tunnel, String strategy, String interfaceName, String weights) {
+    private static JSONObject createServiceConfig(String name, Integer in_port, Integer limiter, String remoteAddr, String protocol, Integer fow_type, Tunnel tunnel, String strategy, String interfaceName, String weights, JSONObject meta) {
         JSONObject service = new JSONObject();
         service.put("name", name + "_" + protocol);
         if (Objects.equals(protocol, "tcp")){
@@ -392,6 +440,13 @@ public class GostUtil {
         if (isPortForwarding(fow_type)) {
             JSONObject forwarder = createForwarder(remoteAddr, strategy, weights);
             service.put("forwarder", forwarder);
+        }
+
+        if (meta != null && !meta.isEmpty()) {
+            JSONObject metadata = service.getJSONObject("metadata");
+            if (metadata == null) metadata = new JSONObject();
+            metadata.putAll(meta);
+            service.put("metadata", metadata);
         }
         return service;
     }

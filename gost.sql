@@ -48,7 +48,18 @@ CREATE TABLE `forward` (
   `probe_status` int(10) NOT NULL DEFAULT '0',
   `probe_time` bigint(20) DEFAULT NULL,
   `probe_message` varchar(255) DEFAULT NULL,
-  `target_weights` varchar(1000) DEFAULT NULL
+  `target_weights` varchar(1000) DEFAULT NULL,
+  `mode` varchar(20) NOT NULL DEFAULT 'direct',
+  `chain_strategy` varchar(20) NOT NULL DEFAULT 'smart',
+  `chain_hops` int(10) NOT NULL DEFAULT '0',
+  `tunnel_ids` varchar(1000) DEFAULT NULL,
+  `bandwidth_mode` varchar(20) NOT NULL DEFAULT 'none',
+  `bandwidth_up` bigint(20) NOT NULL DEFAULT '0',
+  `bandwidth_down` bigint(20) NOT NULL DEFAULT '0',
+  `bandwidth_combined` bigint(20) NOT NULL DEFAULT '0',
+  `max_source_ips` int(10) NOT NULL DEFAULT '0',
+  `max_conn_per_ip` int(10) NOT NULL DEFAULT '0',
+  `expire_at` bigint(20) NOT NULL DEFAULT '0'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- --------------------------------------------------------
@@ -116,10 +127,10 @@ CREATE TABLE `tunnel` (
   `id` int(10) NOT NULL,
   `name` varchar(100) NOT NULL,
   `traffic_ratio` decimal(10,1) NOT NULL DEFAULT '1.0',
-  `in_node_id` int(10) NOT NULL,
-  `in_ip` varchar(100) NOT NULL,
-  `out_node_id` int(10) NOT NULL,
-  `out_ip` varchar(100) NOT NULL,
+  `in_node_id` int(10) DEFAULT NULL,
+  `in_ip` varchar(100) DEFAULT NULL,
+  `out_node_id` int(10) DEFAULT NULL,
+  `out_ip` varchar(100) DEFAULT NULL,
   `type` int(10) NOT NULL,
   `protocol` varchar(10) NOT NULL DEFAULT 'tls',
   `flow` int(10) NOT NULL,

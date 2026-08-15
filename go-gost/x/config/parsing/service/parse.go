@@ -368,6 +368,7 @@ func ParseService(cfg *config.ServiceConfig) (service.Service, error) {
 		xservice.ObserverOption(observer),
 		xservice.ObserverPeriodOption(observerPeriod),
 		xservice.LoggerOption(serviceLogger),
+		xservice.MetadataOption(cfg.Metadata),
 	)
 
 	serviceLogger.Infof("listening on %s/%s", s.Addr().String(), s.Addr().Network())

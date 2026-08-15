@@ -2,6 +2,18 @@
 
 ## 项目更新说明
 
+**2026-08-15 发布 Flux Panel 1.7.0**：
+
+- 转发管理中支持故障转移与负载均衡，可作用于远程多地址或转发端点组
+- 转发支持直连、单跳转发、链式转发
+- 链式转发支持智能选择、固定前N跳、固定后N跳
+- 转发支持独立上下行限速、上下行合计限速
+- 转发支持最大来源IP数、每IP最大连接数、端口到期时间
+- 新增“转发端点”隧道类型，可在端口转发中选择一组或多组转发端点
+- 端口转发界面增加活跃连接统计，展示连接ID、时间、地址、入口、转发器、流量等信息
+- agents 上报服务器 TCP/UDP 连接数量及活跃连接详情
+- agents 1.7.0 支持上述转发限制与连接统计
+
 **2026-08-15 发布 Flux Panel 1.6.0**：
 
 - 暗色模式改为低对比度灰色系
@@ -28,13 +40,13 @@
 ---
 ### Docker Compose部署
 #### 快速部署
-面板端(稳定版 1.6.0)：
+面板端(稳定版 1.7.0)：
 ```bash
-curl -L https://github.com/guanzihao166/flux-panel/releases/download/1.6.0/panel_install.sh -o panel_install.sh && chmod +x panel_install.sh && ./panel_install.sh
+curl -L https://github.com/guanzihao166/flux-panel/releases/download/1.7.0/panel_install.sh -o panel_install.sh && chmod +x panel_install.sh && ./panel_install.sh
 ```
-节点端(稳定版 1.6.0)：
+节点端(稳定版 1.7.0)：
 ```bash
-curl -L https://github.com/guanzihao166/flux-panel/releases/download/1.6.0/install.sh -o install.sh && chmod +x install.sh && ./install.sh
+curl -L https://github.com/guanzihao166/flux-panel/releases/download/1.7.0/install.sh -o install.sh && chmod +x install.sh && ./install.sh
 
 ```
 

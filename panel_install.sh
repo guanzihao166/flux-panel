@@ -8,11 +8,11 @@ export LC_ALL=C
 
 
 # 全局下载地址配置
-DOCKER_COMPOSEV4_URL="https://github.com/guanzihao166/flux-panel/releases/download/1.6.0/docker-compose-v4.yml"
-DOCKER_COMPOSEV6_URL="https://github.com/guanzihao166/flux-panel/releases/download/1.6.0/docker-compose-v6.yml"
-GOST_SQL_URL="https://github.com/guanzihao166/flux-panel/releases/download/1.6.0/gost.sql"
-SOURCE_ARCHIVE_URL="https://github.com/guanzihao166/flux-panel/archive/refs/tags/1.6.0.tar.gz"
-SOURCE_DIR="flux-panel-src-1.6.0"
+DOCKER_COMPOSEV4_URL="https://github.com/guanzihao166/flux-panel/releases/download/1.7.0/docker-compose-v4.yml"
+DOCKER_COMPOSEV6_URL="https://github.com/guanzihao166/flux-panel/releases/download/1.7.0/docker-compose-v6.yml"
+GOST_SQL_URL="https://github.com/guanzihao166/flux-panel/releases/download/1.7.0/gost.sql"
+SOURCE_ARCHIVE_URL="https://github.com/guanzihao166/flux-panel/archive/refs/tags/1.7.0.tar.gz"
+SOURCE_DIR="flux-panel-src-1.7.0"
 
 COUNTRY=$(curl -s https://ipinfo.io/country)
 if [ "$COUNTRY" = "CN" ]; then
@@ -60,11 +60,11 @@ build_panel_images() {
   mkdir -p "$SOURCE_DIR"
   tar -xzf flux-panel-src.tar.gz -C "$SOURCE_DIR" --strip-components=1
 
-  echo "🔨 构建后端镜像 flux-panel/backend:1.6.0..."
-  docker build -t flux-panel/backend:1.6.0 "$SOURCE_DIR/springboot-backend"
+  echo "🔨 构建后端镜像 flux-panel/backend:1.7.0..."
+  docker build -t flux-panel/backend:1.7.0 "$SOURCE_DIR/springboot-backend"
 
-  echo "🔨 构建前端镜像 flux-panel/frontend:1.6.0..."
-  docker build -t flux-panel/frontend:1.6.0 "$SOURCE_DIR/vite-frontend"
+  echo "🔨 构建前端镜像 flux-panel/frontend:1.7.0..."
+  docker build -t flux-panel/frontend:1.7.0 "$SOURCE_DIR/vite-frontend"
 
   rm -rf "$SOURCE_DIR" flux-panel-src.tar.gz
   echo "✅ 面板镜像构建完成"
@@ -1096,6 +1096,168 @@ WHERE NOT EXISTS (SELECT 1 FROM \`vite_config\` WHERE \`name\` = 'turnstile_site
 INSERT INTO \`vite_config\` (\`name\`, \`value\`, \`time\`)
 SELECT 'turnstile_secret_key', '', UNIX_TIMESTAMP(CURRENT_TIMESTAMP(3)) * 1000
 WHERE NOT EXISTS (SELECT 1 FROM \`vite_config\` WHERE \`name\` = 'turnstile_secret_key');
+
+-- 1.7.0: 转发管理新增模式、端点组、带宽和连接限制字段
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1 FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE() AND table_name = 'forward' AND column_name = 'mode'
+    ),
+    'ALTER TABLE \`forward\` ADD COLUMN \`mode\` VARCHAR(20) NOT NULL DEFAULT ''direct''',
+    'SELECT "mode exists";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1 FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE() AND table_name = 'forward' AND column_name = 'chain_strategy'
+    ),
+    'ALTER TABLE \`forward\` ADD COLUMN \`chain_strategy\` VARCHAR(20) NOT NULL DEFAULT ''smart''',
+    'SELECT "chain_strategy exists";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1 FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE() AND table_name = 'forward' AND column_name = 'chain_hops'
+    ),
+    'ALTER TABLE \`forward\` ADD COLUMN \`chain_hops\` INT(10) NOT NULL DEFAULT 0',
+    'SELECT "chain_hops exists";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1 FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE() AND table_name = 'forward' AND column_name = 'tunnel_ids'
+    ),
+    'ALTER TABLE \`forward\` ADD COLUMN \`tunnel_ids\` VARCHAR(1000) DEFAULT NULL',
+    'SELECT "tunnel_ids exists";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1 FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE() AND table_name = 'forward' AND column_name = 'bandwidth_mode'
+    ),
+    'ALTER TABLE \`forward\` ADD COLUMN \`bandwidth_mode\` VARCHAR(20) NOT NULL DEFAULT ''none''',
+    'SELECT "bandwidth_mode exists";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1 FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE() AND table_name = 'forward' AND column_name = 'bandwidth_up'
+    ),
+    'ALTER TABLE \`forward\` ADD COLUMN \`bandwidth_up\` BIGINT(20) NOT NULL DEFAULT 0',
+    'SELECT "bandwidth_up exists";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1 FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE() AND table_name = 'forward' AND column_name = 'bandwidth_down'
+    ),
+    'ALTER TABLE \`forward\` ADD COLUMN \`bandwidth_down\` BIGINT(20) NOT NULL DEFAULT 0',
+    'SELECT "bandwidth_down exists";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1 FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE() AND table_name = 'forward' AND column_name = 'bandwidth_combined'
+    ),
+    'ALTER TABLE \`forward\` ADD COLUMN \`bandwidth_combined\` BIGINT(20) NOT NULL DEFAULT 0',
+    'SELECT "bandwidth_combined exists";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1 FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE() AND table_name = 'forward' AND column_name = 'max_source_ips'
+    ),
+    'ALTER TABLE \`forward\` ADD COLUMN \`max_source_ips\` INT(10) NOT NULL DEFAULT 0',
+    'SELECT "max_source_ips exists";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1 FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE() AND table_name = 'forward' AND column_name = 'max_conn_per_ip'
+    ),
+    'ALTER TABLE \`forward\` ADD COLUMN \`max_conn_per_ip\` INT(10) NOT NULL DEFAULT 0',
+    'SELECT "max_conn_per_ip exists";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @sql = (
+  SELECT IF(
+    NOT EXISTS (
+      SELECT 1 FROM information_schema.COLUMNS
+      WHERE table_schema = DATABASE() AND table_name = 'forward' AND column_name = 'expire_at'
+    ),
+    'ALTER TABLE \`forward\` ADD COLUMN \`expire_at\` BIGINT(20) NOT NULL DEFAULT 0',
+    'SELECT "expire_at exists";'
+  )
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- tunnel 表：允许转发端点使用空入口/出口信息
+ALTER TABLE \`tunnel\`
+  MODIFY COLUMN \`in_node_id\` INT(10) DEFAULT NULL,
+  MODIFY COLUMN \`in_ip\` VARCHAR(100) DEFAULT NULL,
+  MODIFY COLUMN \`out_node_id\` INT(10) DEFAULT NULL,
+  MODIFY COLUMN \`out_ip\` VARCHAR(100) DEFAULT NULL;
 
 EOF
 
