@@ -192,7 +192,8 @@ install_gost() {
 
   mkdir -p "$INSTALL_DIR"
 
-  # 停止并禁用已有服务
+  # 停止并禁用已有服务，同时清理可能残留的 gost 进程，避免双连接循环
+  pkill -f '/etc/gost/gost' 2>/dev/null || true
   if systemctl list-units --full -all | grep -Fq "gost.service"; then
     echo "🔍 检测到已存在的gost服务"
     systemctl stop gost 2>/dev/null && echo "🛑 停止服务"
@@ -291,7 +292,8 @@ update_gost() {
     return 1
   fi
 
-  # 停止服务
+  # 停止服务，并清理可能残留的 gost 进程
+  pkill -f '/etc/gost/gost' 2>/dev/null || true
   if systemctl list-units --full -all | grep -Fq "gost.service"; then
     echo "🛑 停止 gost 服务..."
     systemctl stop gost
