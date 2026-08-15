@@ -57,6 +57,17 @@ download_valid_gost() {
   return 1
 }
 
+# 停止 gost 服务并删除所有残留进程，避免出现多条 WebSocket 连接
+stop_all_gost() {
+  echo "🛑 停止 gost 服务..."
+  systemctl stop gost 2>/dev/null || true
+  systemctl disable gost 2>/dev/null || true
+  echo "🧹 删除残留 gost 进程..."
+  pkill -9 -f '/etc/gost/gost' 2>/dev/null || true
+  pkill -9 -x gost 2>/dev/null || true
+  sleep 1
+}
+
 INSTALL_DIR="/etc/gost"
 
 
@@ -192,13 +203,8 @@ install_gost() {
 
   mkdir -p "$INSTALL_DIR"
 
-  # 停止并禁用已有服务，同时清理可能残留的 gost 进程，避免双连接循环
-  pkill -f '/etc/gost/gost' 2>/dev/null || true
-  if systemctl list-units --full -all | grep -Fq "gost.service"; then
-    echo "🔍 检测到已存在的gost服务"
-    systemctl stop gost 2>/dev/null && echo "🛑 停止服务"
-    systemctl disable gost 2>/dev/null && echo "🚫 禁用自启"
-  fi
+  # 停止并清理已有 gost，避免残留进程导致双连接循环
+  stop_all_gost
 
   # 下载并校验 gost（不破坏现有文件，失败时保留旧版）
   rm -f "$INSTALL_DIR/gost.new"
@@ -292,12 +298,8 @@ update_gost() {
     return 1
   fi
 
-  # 停止服务，并清理可能残留的 gost 进程
-  pkill -f '/etc/gost/gost' 2>/dev/null || true
-  if systemctl list-units --full -all | grep -Fq "gost.service"; then
-    echo "🛑 停止 gost 服务..."
-    systemctl stop gost
-  fi
+  # 停止服务，并删除所有残留 gost 进程
+  stop_all_gost
 
   # 替换文件
   mv "$INSTALL_DIR/gost.new" "$INSTALL_DIR/gost"
@@ -323,12 +325,8 @@ uninstall_gost() {
     return 0
   fi
 
-  # 停止并禁用服务
-  if systemctl list-units --full -all | grep -Fq "gost.service"; then
-    echo "🛑 停止并禁用服务..."
-    systemctl stop gost 2>/dev/null
-    systemctl disable gost 2>/dev/null
-  fi
+  # 停止服务并删除残留 gost 进程
+  stop_all_gost
 
   # 删除服务文件
   if [[ -f "/etc/systemd/system/gost.service" ]]; then
