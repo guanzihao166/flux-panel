@@ -15,7 +15,7 @@ public class TunnelDto {
     @NotBlank(message = "隧道名称不能为空")
     private String name;
 
-    @NotNull(message = "入口节点不能为空")
+    // 转发端点不需要入口节点；其余类型由 TunnelServiceImpl 按类型校验。
     private Long inNodeId;
 
     // 出口节点ID，当type=1时可以为空，会自动设置为入口节点ID

@@ -109,6 +109,10 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
      */
     @Override
     public R createTunnel(TunnelDto tunnelDto) {
+        if (tunnelDto.getType() != TUNNEL_TYPE_FORWARD_ENDPOINT && tunnelDto.getInNodeId() == null) {
+            return R.err("入口节点不能为空");
+        }
+
         // 1. 验证隧道名称唯一性
         R nameValidationResult = validateTunnelNameUniqueness(tunnelDto.getName());
         if (nameValidationResult.getCode() != 0) {
