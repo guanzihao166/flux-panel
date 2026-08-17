@@ -600,6 +600,18 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             return;
         }
 
+        // Endpoint routes replace the primary tunnel's output path.  Probing the
+        // primary tunnel here would therefore report an unrelated relay result.
+        if (!"direct".equals(forward.getMode()) && !isBlank(forward.getTunnelIds())) {
+            List<Tunnel> endpointTunnels = getEndpointTunnels(forward);
+            if (endpointTunnels.isEmpty()) {
+                updateProbeResult(forward, -1, null, "没有可用的转发端点");
+                return;
+            }
+            probeEndpointForward(forward, inNode, endpointTunnels);
+            return;
+        }
+
         if (forward.getOutPort() == null) {
             updateProbeResult(forward, -1, null, "出口端口不存在");
             return;
@@ -644,6 +656,89 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         if (availableRoutes == 0) updateProbeResult(forward, -1, null, "无完整可用路径（共 " + outputIds.size() + " 条）");
         else updateProbeResult(forward, 1, totalLatency / availableRoutes,
                 "可用路径 " + availableRoutes + "/" + outputIds.size());
+    }
+
+    private void probeEndpointForward(Forward forward, Node inNode, List<Tunnel> endpointTunnels) {
+        if (forward.getOutPort() == null) {
+            updateProbeResult(forward, -1, null, "出口端口不存在");
+            return;
+        }
+
+        List<Tunnel> routeEndpoints = "single".equals(forward.getMode())
+                ? Collections.singletonList(endpointTunnels.get(0))
+                : endpointTunnels;
+        List<Node> previousNodes = Collections.singletonList(inNode);
+        double totalLatency = 0;
+        int latencySamples = 0;
+
+        for (Tunnel endpoint : routeEndpoints) {
+            for (Long chainId : applyChainSelection(endpoint, forward)) {
+                Node chainNode = nodeService.getNodeById(chainId);
+                if (chainNode == null || chainNode.getStatus() != TUNNEL_STATUS_ACTIVE) {
+                    updateProbeResult(forward, -1, null, "端点中继节点离线: " + chainId);
+                    return;
+                }
+                Double latency = probeHop(previousNodes, chainNode, forward.getOutPort(), "端点中继");
+                if (latency == null) {
+                    updateProbeResult(forward, -1, null, "端点中继不可达: " + chainNode.getName());
+                    return;
+                }
+                totalLatency += latency;
+                latencySamples++;
+                previousNodes = Collections.singletonList(chainNode);
+            }
+
+            List<Long> outputIds = parseCsvNodeIds(endpoint.getOutNodeIds());
+            if (outputIds.isEmpty() && endpoint.getOutNodeId() != null) outputIds.add(endpoint.getOutNodeId());
+            List<Node> outputNodes = new ArrayList<>();
+            for (Long outputId : outputIds) {
+                Node outputNode = nodeService.getNodeById(outputId);
+                if (outputNode == null || outputNode.getStatus() != TUNNEL_STATUS_ACTIVE) continue;
+                Double latency = probeHop(previousNodes, outputNode, forward.getOutPort(), "端点出口");
+                if (latency != null) {
+                    totalLatency += latency;
+                    latencySamples++;
+                    outputNodes.add(outputNode);
+                }
+            }
+            if (outputNodes.isEmpty()) {
+                updateProbeResult(forward, -1, null, "端点出口不可达: " + endpoint.getName());
+                return;
+            }
+            previousNodes = outputNodes;
+        }
+
+        int availableTargets = 0;
+        for (Node outputNode : previousNodes) {
+            for (String address : forward.getRemoteAddr().split(",")) {
+                String ip = extractIpFromAddress(address);
+                int port = extractPortFromAddress(address);
+                if (ip == null || port < 1) continue;
+                DiagnosisResult target = performTcpPingDiagnosis(outputNode, ip, port, "端点出口->目标");
+                if (target.isSuccess()) {
+                    totalLatency += target.getAverageTime();
+                    latencySamples++;
+                    availableTargets++;
+                }
+            }
+        }
+        if (availableTargets == 0) {
+            updateProbeResult(forward, -1, null, "端点到目标不可达");
+            return;
+        }
+        updateProbeResult(forward, 1, totalLatency / Math.max(1, latencySamples),
+                "端点路径可用 " + availableTargets + "/" + previousNodes.size());
+    }
+
+    private Double probeHop(List<Node> sourceNodes, Node targetNode, Integer port, String description) {
+        Double bestLatency = null;
+        for (Node sourceNode : sourceNodes) {
+            DiagnosisResult result = performTcpPingDiagnosis(sourceNode, targetNode.getServerIp(), port, description);
+            if (!result.isSuccess()) continue;
+            double latency = result.getAverageTime();
+            if (bestLatency == null || latency < bestLatency) bestLatency = latency;
+        }
+        return bestLatency;
     }
 
     private void updateProbeResult(Forward forward, int status, Double latency, String message) {
