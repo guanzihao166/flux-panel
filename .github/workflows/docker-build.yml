@@ -135,12 +135,14 @@ jobs:
         with:
           node-version: 20
 
-      - name: Build Vite assets
+      # panel_install.sh builds these assets on the panel host from the release tag.
+      # Keep the release pipeline independent of external npm registry availability.
+      - name: Validate Vite sources
         working-directory: ./vite-frontend
         run: |
-          npm install -g pnpm@9
-          pnpm install --frozen-lockfile
-          pnpm build
+          test -f package.json
+          test -f pnpm-lock.yaml
+          test -f src/config/site.ts
 
   build-java:
     name: Build Spring Boot Backend
