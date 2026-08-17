@@ -651,6 +651,11 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         forward.setLatencyMs(latency);
         forward.setProbeTime(System.currentTimeMillis());
         forward.setProbeMessage(message == null ? null : message.substring(0, Math.min(255, message.length())));
+        // A successful end-to-end probe proves a previously failed service is usable again.
+        // Preserve paused forwards, but let an error state rejoin scheduled probing.
+        if (status == 1 && Objects.equals(forward.getStatus(), FORWARD_STATUS_ERROR)) {
+            forward.setStatus(FORWARD_STATUS_ACTIVE);
+        }
         updateById(forward);
     }
 
