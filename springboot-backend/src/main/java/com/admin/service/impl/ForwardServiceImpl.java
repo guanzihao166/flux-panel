@@ -436,21 +436,34 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         String serviceName = buildServiceName(forward.getId(), forward.getUserId(), userTunnel);
         GostDto gostResult;
 
+        boolean endpointRoute = !"direct".equals(forward.getMode()) && !isBlank(forward.getTunnelIds());
         if ("PauseService".equals(gostMethod)) {
             gostResult = GostUtil.PauseService(nodeInfo.getInNode().getId(), serviceName);
 
+            if (isGostOperationSuccess(gostResult) && endpointRoute) {
+                R endpointResult = changeEndpointRouteServiceStatus(forward, serviceName, true);
+                if (endpointResult.getCode() != 0) {
+                    GostUtil.ResumeService(nodeInfo.getInNode().getId(), serviceName);
+                    return endpointResult;
+                }
+            }
+
             // 隧道转发需要同时暂停远端服务
-            if (tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD && nodeInfo.getOutNode() != null) {
+            if (!endpointRoute && tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD && nodeInfo.getOutNode() != null) {
                 GostDto remoteResult = GostUtil.PauseRemoteService(nodeInfo.getOutNode().getId(), serviceName);
                 if (!isGostOperationSuccess(remoteResult)) {
                     return R.err(operation + "远端服务失败：" + remoteResult.getMsg());
                 }
             }
         } else {
+            if (endpointRoute) {
+                R endpointResult = changeEndpointRouteServiceStatus(forward, serviceName, false);
+                if (endpointResult.getCode() != 0) return endpointResult;
+            }
             gostResult = GostUtil.ResumeService(nodeInfo.getInNode().getId(), serviceName);
 
             // 隧道转发需要同时恢复远端服务
-            if (tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD && nodeInfo.getOutNode() != null) {
+            if (!endpointRoute && tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD && nodeInfo.getOutNode() != null) {
                 GostDto remoteResult = GostUtil.ResumeRemoteService(nodeInfo.getOutNode().getId(), serviceName);
                 if (!isGostOperationSuccess(remoteResult)) {
                     return R.err(operation + "远端服务失败：" + remoteResult.getMsg());
@@ -1507,6 +1520,31 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             } catch (NumberFormatException ignored) { }
         }
         return result;
+    }
+
+    private R changeEndpointRouteServiceStatus(Forward forward, String serviceName, boolean pause) {
+        List<Tunnel> endpointTunnels = getEndpointTunnels(forward);
+        if (endpointTunnels.isEmpty()) return R.err("没有可用的转发端点");
+
+        List<Tunnel> routeEndpoints = "single".equals(forward.getMode())
+                ? Collections.singletonList(endpointTunnels.get(0))
+                : endpointTunnels;
+        Set<Long> nodeIds = new LinkedHashSet<>();
+        for (Tunnel endpoint : routeEndpoints) {
+            if (!"single".equals(forward.getMode())) nodeIds.addAll(applyChainSelection(endpoint, forward));
+            List<Long> outputIds = parseCsvNodeIds(endpoint.getOutNodeIds());
+            if (outputIds.isEmpty() && endpoint.getOutNodeId() != null) outputIds.add(endpoint.getOutNodeId());
+            nodeIds.addAll(outputIds);
+        }
+        for (Long nodeId : nodeIds) {
+            GostDto result = pause
+                    ? GostUtil.PauseRemoteService(nodeId, serviceName)
+                    : GostUtil.ResumeRemoteService(nodeId, serviceName);
+            if (!isGostOperationSuccess(result)) {
+                return R.err((pause ? "暂停" : "恢复") + "端点服务失败：" + result.getMsg());
+            }
+        }
+        return R.ok();
     }
 
     private List<Long> applyChainSelection(Tunnel tunnel, Forward forward) {
