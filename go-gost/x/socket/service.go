@@ -87,12 +87,9 @@ func updateServices(req updateServicesRequest) error {
 		return errors.New("services list cannot be empty")
 	}
 
-	// Parse every replacement before changing the registry. UpdateService is an
-	// upsert because older agents can have only one of a TCP/UDP service pair.
-	var parsedServices []struct {
-		config  config.ServiceConfig
-		service service.Service
-	}
+	// UpdateService is an upsert because older agents can have only one member
+	// of a TCP/UDP service pair.
+	services := make([]config.ServiceConfig, 0, len(req.Data))
 	seen := make(map[string]struct{}, len(req.Data))
 	for _, serviceConfig := range req.Data {
 		name := strings.TrimSpace(serviceConfig.Name)
@@ -104,23 +101,31 @@ func updateServices(req updateServicesRequest) error {
 		}
 		seen[name] = struct{}{}
 		serviceConfig.Name = name
+		services = append(services, serviceConfig)
+	}
 
+	// ParseService opens the listener, so release an existing listener before
+	// parsing its replacement to avoid a transient bind conflict on the port.
+	for _, serviceConfig := range services {
+		if old := registry.ServiceRegistry().Get(serviceConfig.Name); old != nil {
+			old.Close()
+			registry.ServiceRegistry().Unregister(serviceConfig.Name)
+		}
+	}
+
+	var parsedServices []struct {
+		config  config.ServiceConfig
+		service service.Service
+	}
+	for _, serviceConfig := range services {
 		svc, err := parser.ParseService(&serviceConfig)
 		if err != nil {
-			return errors.New("create service " + name + " failed: " + err.Error())
+			return errors.New("create service " + serviceConfig.Name + " failed: " + err.Error())
 		}
 		parsedServices = append(parsedServices, struct {
 			config  config.ServiceConfig
 			service service.Service
 		}{serviceConfig, svc})
-	}
-
-	// Replace existing services and create missing members of a service pair.
-	for _, ps := range parsedServices {
-		if old := registry.ServiceRegistry().Get(ps.config.Name); old != nil {
-			old.Close()
-			registry.ServiceRegistry().Unregister(ps.config.Name)
-		}
 	}
 
 	var registeredServices []string
