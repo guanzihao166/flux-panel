@@ -138,7 +138,7 @@ jobs:
       - name: Build Vite assets
         working-directory: ./vite-frontend
         run: |
-          corepack enable
+          npm install -g pnpm@9
           pnpm install --frozen-lockfile
           pnpm build
 
