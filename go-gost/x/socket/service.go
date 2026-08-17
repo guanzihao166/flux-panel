@@ -87,58 +87,71 @@ func updateServices(req updateServicesRequest) error {
 		return errors.New("services list cannot be empty")
 	}
 
-	// 第一阶段：验证所有服务存在
+	// Parse every replacement before changing the registry. UpdateService is an
+	// upsert because older agents can have only one of a TCP/UDP service pair.
+	var parsedServices []struct {
+		config  config.ServiceConfig
+		service service.Service
+	}
+	seen := make(map[string]struct{}, len(req.Data))
 	for _, serviceConfig := range req.Data {
 		name := strings.TrimSpace(serviceConfig.Name)
 		if name == "" {
 			return errors.New("service name is required")
 		}
-		serviceConfig.Name = name
-
-		old := registry.ServiceRegistry().Get(name)
-		if old == nil {
-			return errors.New("service " + name + " not found")
+		if _, exists := seen[name]; exists {
+			return errors.New("duplicate service " + name)
 		}
-	}
-
-	// 第二阶段：按照原来的updateService逻辑，逐个更新服务
-	for _, serviceConfig := range req.Data {
-		name := strings.TrimSpace(serviceConfig.Name)
+		seen[name] = struct{}{}
 		serviceConfig.Name = name
 
-		// 1. 获取旧服务
-		old := registry.ServiceRegistry().Get(name)
-
-		// 2. 关闭旧服务
-		old.Close()
-
-		// 3. 从注册表移除旧服务
-		registry.ServiceRegistry().Unregister(name)
-
-		// 4. 解析新服务配置
 		svc, err := parser.ParseService(&serviceConfig)
 		if err != nil {
 			return errors.New("create service " + name + " failed: " + err.Error())
 		}
-
-		// 5. 注册新服务
-		if err := registry.ServiceRegistry().Register(name, svc); err != nil {
-			svc.Close()
-			return errors.New("service " + name + " already exists")
-		}
-
-		// 6. 启动新服务
-		go svc.Serve()
+		parsedServices = append(parsedServices, struct {
+			config  config.ServiceConfig
+			service service.Service
+		}{serviceConfig, svc})
 	}
 
-	// 第三阶段：更新配置
+	// Replace existing services and create missing members of a service pair.
+	for _, ps := range parsedServices {
+		if old := registry.ServiceRegistry().Get(ps.config.Name); old != nil {
+			old.Close()
+			registry.ServiceRegistry().Unregister(ps.config.Name)
+		}
+	}
+
+	var registeredServices []string
+	for _, ps := range parsedServices {
+		if err := registry.ServiceRegistry().Register(ps.config.Name, ps.service); err != nil {
+			for _, registeredName := range registeredServices {
+				registry.ServiceRegistry().Unregister(registeredName)
+			}
+			ps.service.Close()
+			return errors.New("service " + ps.config.Name + " already exists")
+		}
+		registeredServices = append(registeredServices, ps.config.Name)
+	}
+
+	for _, ps := range parsedServices {
+		go ps.service.Serve()
+	}
+
+	// Keep the persisted configuration in sync for both replaced and new services.
 	config.OnUpdate(func(c *config.Config) error {
-		for _, serviceConfig := range req.Data {
+		for _, ps := range parsedServices {
+			updated := false
 			for i := range c.Services {
-				if c.Services[i].Name == serviceConfig.Name {
-					c.Services[i] = &serviceConfig
+				if c.Services[i].Name == ps.config.Name {
+					c.Services[i] = &ps.config
+					updated = true
 					break
 				}
+			}
+			if !updated {
+				c.Services = append(c.Services, &ps.config)
 			}
 		}
 		return nil
