@@ -171,16 +171,19 @@ export default function TunnelPage() {
       newErrors.name = '隧道名称长度应在2-50个字符之间';
     }
 
-    if (!form.inNodeId) {
-      newErrors.inNodeId = '请选择入口节点';
-    }
+    // 转发端点不监听入口端口，入口节点和监听地址仅适用于端口/隧道转发。
+    if (form.type !== 3) {
+      if (!form.inNodeId) {
+        newErrors.inNodeId = '请选择入口节点';
+      }
 
-    if (!form.tcpListenAddr.trim()) {
-      newErrors.tcpListenAddr = '请输入TCP监听地址';
-    }
+      if (!form.tcpListenAddr.trim()) {
+        newErrors.tcpListenAddr = '请输入TCP监听地址';
+      }
 
-    if (!form.udpListenAddr.trim()) {
-      newErrors.udpListenAddr = '请输入UDP监听地址';
+      if (!form.udpListenAddr.trim()) {
+        newErrors.udpListenAddr = '请输入UDP监听地址';
+      }
     }
 
     if (form.trafficRatio < 0.0 || form.trafficRatio > 100.0) {
@@ -298,7 +301,10 @@ export default function TunnelPage() {
 
   // 提交表单
   const handleSubmit = async () => {
-    if (!validateForm()) return;
+    if (!validateForm()) {
+      toast.error('请检查表单中的必填项');
+      return;
+    }
 
     setSubmitLoading(true);
     try {
