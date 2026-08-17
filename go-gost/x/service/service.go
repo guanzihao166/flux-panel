@@ -294,12 +294,14 @@ func (s *defaultService) Serve() error {
 				conn = wrapConnPDetection(conn)
 			}
 
-			tracked := s.trackConnection(conn, clientAddr, clientIP)
-			if tracked == nil {
+			tracked, rejected := s.trackConnection(conn, clientAddr, clientIP)
+			if rejected {
 				return
 			}
-			conn = tracked.conn
-			defer tracked.close()
+			if tracked != nil {
+				conn = tracked.conn
+				defer tracked.close()
+			}
 
 			if err := s.handler.Handle(ctx, conn); err != nil {
 				log.Error(err)
@@ -315,13 +317,13 @@ func (s *defaultService) Serve() error {
 	}
 }
 
-func (s *defaultService) trackConnection(conn net.Conn, clientAddr, clientIP string) *trackedConn {
+func (s *defaultService) trackConnection(conn net.Conn, clientAddr, clientIP string) (*trackedConn, bool) {
 	if !shouldTrackConnection(s.name, s.options.metadata) {
-		return nil
+		return nil, false
 	}
 	if !s.guard.admit(clientIP) {
 		conn.Close()
-		return nil
+		return nil, true
 	}
 	typ := "tcp"
 	if strings.HasSuffix(s.name, "_udp") {
@@ -358,12 +360,12 @@ func (s *defaultService) trackConnection(conn net.Conn, clientAddr, clientIP str
 	t.info.ConnectionId = t.id
 	t.conn = &countingConn{Conn: conn, upload: &t.upload, download: &t.download, bw: s.bandwidth}
 	connRegistry.add(s.name, t)
-	return t
+	return t, false
 }
 
 // shouldTrackConnection 兼容旧版本无元数据的面板转发服务。
 // 新服务通过 flux_forward_id 识别，旧服务名保持 {forwardId}_{userId}_{userTunnelId}[_tcp|_udp] 格式。
-// 出口中继服务（_tls）不参与活跃连接统计，避免一个用户连接被重复计数。
+// 出口中继服务（_tls）不参与活跃连接统计，避免一个用户连接被重复计数，但 handler 必须正常执行。
 func shouldTrackConnection(serviceName string, metadata map[string]any) bool {
 	if strings.HasSuffix(serviceName, "_tls") {
 		return false

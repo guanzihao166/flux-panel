@@ -401,7 +401,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         StringBuilder command = new StringBuilder();
 
         // 第一部分：下载安装脚本
-        command.append("curl -L https://github.com/guanzihao166/flux-panel/releases/download/1.7.0/install.sh")
+        command.append("curl -fL https://github.com/guanzihao166/flux-panel/releases/download/1.7.1/install.sh")
                .append(" -o ./install.sh && chmod +x ./install.sh && ");
 
         // 处理服务器地址，如果是IPv6需要添加方括号

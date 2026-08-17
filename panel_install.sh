@@ -8,11 +8,11 @@ export LC_ALL=C
 
 
 # 全局下载地址配置
-DOCKER_COMPOSEV4_URL="https://github.com/guanzihao166/flux-panel/releases/download/1.7.0/docker-compose-v4.yml"
-DOCKER_COMPOSEV6_URL="https://github.com/guanzihao166/flux-panel/releases/download/1.7.0/docker-compose-v6.yml"
-GOST_SQL_URL="https://github.com/guanzihao166/flux-panel/releases/download/1.7.0/gost.sql"
-SOURCE_ARCHIVE_URL="https://github.com/guanzihao166/flux-panel/archive/refs/tags/1.7.0.tar.gz"
-SOURCE_DIR="flux-panel-src-1.7.0"
+DOCKER_COMPOSEV4_URL="https://github.com/guanzihao166/flux-panel/releases/download/1.7.1/docker-compose-v4.yml"
+DOCKER_COMPOSEV6_URL="https://github.com/guanzihao166/flux-panel/releases/download/1.7.1/docker-compose-v6.yml"
+GOST_SQL_URL="https://github.com/guanzihao166/flux-panel/releases/download/1.7.1/gost.sql"
+SOURCE_ARCHIVE_URL="https://github.com/guanzihao166/flux-panel/archive/refs/tags/1.7.1.tar.gz"
+SOURCE_DIR="flux-panel-src-1.7.1"
 
 COUNTRY=$(curl -s https://ipinfo.io/country)
 if [ "$COUNTRY" = "CN" ]; then
@@ -60,11 +60,11 @@ build_panel_images() {
   mkdir -p "$SOURCE_DIR"
   tar -xzf flux-panel-src.tar.gz -C "$SOURCE_DIR" --strip-components=1
 
-  echo "🔨 构建后端镜像 flux-panel/backend:1.7.0..."
-  docker build -t flux-panel/backend:1.7.0 "$SOURCE_DIR/springboot-backend"
+  echo "🔨 构建后端镜像 flux-panel/backend:1.7.1..."
+  docker build -t flux-panel/backend:1.7.1 "$SOURCE_DIR/springboot-backend"
 
-  echo "🔨 构建前端镜像 flux-panel/frontend:1.7.0..."
-  docker build -t flux-panel/frontend:1.7.0 "$SOURCE_DIR/vite-frontend"
+  echo "🔨 构建前端镜像 flux-panel/frontend:1.7.1..."
+  docker build -t flux-panel/frontend:1.7.1 "$SOURCE_DIR/vite-frontend"
 
   rm -rf "$SOURCE_DIR" flux-panel-src.tar.gz
   echo "✅ 面板镜像构建完成"

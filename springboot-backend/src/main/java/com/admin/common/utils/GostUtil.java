@@ -112,7 +112,8 @@ public class GostUtil {
         handler.put("type", "relay");
         data.put("handler", handler);
         JSONObject listener = new JSONObject();
-        listener.put("type", protocol);
+        // relay 协议始终走 TCP 传输，UDP/TLS 业务由 relay handler 在 TCP 连接内承载。
+        listener.put("type", "tcp");
         data.put("listener", listener);
         if (withForwarder) {
             JSONObject forwarder = new JSONObject();
@@ -148,7 +149,7 @@ public class GostUtil {
         handler.put("type", "relay");
         data.put("handler", handler);
         JSONObject listener = new JSONObject();
-        listener.put("type", protocol);
+        listener.put("type", "tcp");
         data.put("listener", listener);
         JSONObject forwarder = new JSONObject();
         JSONArray nodes = new JSONArray();
@@ -206,16 +207,8 @@ public class GostUtil {
 
     public static GostDto AddChains(Long node_id, String name, String remoteAddr, String protocol, String interfaceName) {
         JSONObject dialer = new JSONObject();
-        dialer.put("type", protocol);
-        if (Objects.equals(protocol, "quic")){
-            JSONObject metadata = new JSONObject();
-            metadata.put("keepAlive", true);
-            metadata.put("ttl", "10s");
-            dialer.put("metadata", metadata);
-        }
-
-
-
+        // relay 节点只负责承载 relay 协议，与业务层 TCP/UDP 无关，因此固定 TCP 拨号。
+        dialer.put("type", "tcp");
 
         JSONObject connector = new JSONObject();
         connector.put("type", "relay");
@@ -250,15 +243,7 @@ public class GostUtil {
 
     public static GostDto UpdateChains(Long node_id, String name, String remoteAddr, String protocol, String interfaceName) {
         JSONObject dialer = new JSONObject();
-        dialer.put("type", protocol);
-
-        if (Objects.equals(protocol, "quic")){
-            JSONObject metadata = new JSONObject();
-            metadata.put("keepAlive", true);
-            metadata.put("ttl", "10s");
-            dialer.put("metadata", metadata);
-        }
-
+        dialer.put("type", "tcp");
 
         JSONObject connector = new JSONObject();
         connector.put("type", "relay");
@@ -358,13 +343,7 @@ public class GostUtil {
                     connector.put("type", "relay");
                     node.put("connector", connector);
                     JSONObject dialer = new JSONObject();
-                    dialer.put("type", protocol);
-                    if (Objects.equals(protocol, "quic")) {
-                        JSONObject metadata = new JSONObject();
-                        metadata.put("keepAlive", true);
-                        metadata.put("ttl", "10s");
-                        dialer.put("metadata", metadata);
-                    }
+                    dialer.put("type", "tcp");
                     node.put("dialer", dialer);
                     if (StringUtils.isNotBlank(interfaceName) && hopIndex == 0) node.put("interface", interfaceName);
                     nodes.add(node);

@@ -2,7 +2,7 @@
 
 ## 项目更新说明
 
-**2026-08-15 发布 Flux Panel 1.7.0**：
+**2026-08-17 发布 Flux Panel 1.7.1**：
 
 - 转发管理中支持故障转移与负载均衡，可作用于远程多地址或转发端点组
 - 转发支持直连、单跳转发、链式转发
@@ -40,13 +40,13 @@
 ---
 ### Docker Compose部署
 #### 快速部署
-面板端(稳定版 1.7.0)：
+面板端(稳定版 1.7.1)：
 ```bash
-curl -L https://github.com/guanzihao166/flux-panel/releases/download/1.7.0/panel_install.sh -o panel_install.sh && chmod +x panel_install.sh && ./panel_install.sh
+curl -fL https://github.com/guanzihao166/flux-panel/releases/download/1.7.1/panel_install.sh -o panel_install.sh && chmod +x panel_install.sh && ./panel_install.sh
 ```
-节点端(稳定版 1.7.0)：
+节点端(稳定版 1.7.1)：
 ```bash
-curl -L https://github.com/guanzihao166/flux-panel/releases/download/1.7.0/install.sh -o install.sh && chmod +x install.sh && ./install.sh
+curl -fL https://github.com/guanzihao166/flux-panel/releases/download/1.7.1/install.sh -o install.sh && chmod +x install.sh && ./install.sh
 
 ```
 
