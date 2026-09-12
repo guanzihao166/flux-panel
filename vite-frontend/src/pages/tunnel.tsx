@@ -40,6 +40,7 @@ interface Tunnel {
   outNodeWeights?: string;
   chainNodeIds?: string;
   nodeIpModes?: string;
+  entryIpMode?: 'auto' | 'ipv4' | 'ipv6';
   balanceStrategy?: string;
   maxFails?: number;
   failTimeout?: number;
@@ -71,6 +72,7 @@ interface TunnelForm {
   outNodeWeights: string;
   chainNodeIds: string;
   nodeIpModes: string;
+  entryIpMode: 'auto' | 'ipv4' | 'ipv6';
   balanceStrategy: string;
   maxFails: number;
   failTimeout: number;
@@ -127,6 +129,7 @@ export default function TunnelPage() {
     outNodeWeights: '',
     chainNodeIds: '',
     nodeIpModes: '',
+    entryIpMode: 'auto',
     balanceStrategy: 'fifo',
     maxFails: 1,
     failTimeout: 30
@@ -261,6 +264,16 @@ export default function TunnelPage() {
         newErrors.protocol = '请选择协议类型';
       }
 
+      const entryNode = nodes.find(item => item.id === form.inNodeId);
+      if (form.type === 2 && form.entryIpMode !== 'auto' && entryNode) {
+        if (form.entryIpMode === 'ipv4' && !nodeHasIpv4(entryNode)) {
+          newErrors.entryIpMode = `入口节点「${entryNode.name}」未配置 IPv4 服务器地址`;
+        }
+        if (form.entryIpMode === 'ipv6' && !nodeHasIpv6(entryNode)) {
+          newErrors.entryIpMode = `入口节点「${entryNode.name}」未配置 IPv6 服务器地址`;
+        }
+      }
+
       const routeIds = getRouteNodeIds();
       const ipModes = parseNodeIpModes(form.nodeIpModes);
       for (const nodeId of routeIds) {
@@ -301,6 +314,7 @@ export default function TunnelPage() {
       outNodeWeights: '',
       chainNodeIds: '',
       nodeIpModes: '',
+      entryIpMode: 'auto',
       balanceStrategy: 'fifo',
       maxFails: 1,
       failTimeout: 30
@@ -329,6 +343,7 @@ export default function TunnelPage() {
       outNodeWeights: tunnel.outNodeWeights || '1',
       chainNodeIds: tunnel.chainNodeIds || '',
       nodeIpModes: tunnel.nodeIpModes || '',
+      entryIpMode: tunnel.entryIpMode || 'auto',
       balanceStrategy: tunnel.balanceStrategy || 'fifo',
       maxFails: tunnel.maxFails || 1,
       failTimeout: tunnel.failTimeout || 30
@@ -864,6 +879,22 @@ export default function TunnelPage() {
                             </SelectItem>
                           ))}
                         </Select>
+
+                        {form.type === 2 && (
+                          <Select
+                            label="入口节点出站通信 IP"
+                            selectedKeys={[form.entryIpMode]}
+                            onSelectionChange={(keys) => setForm(prev => ({ ...prev, entryIpMode: String(Array.from(keys)[0] || 'auto') as 'auto' | 'ipv4' | 'ipv6' }))}
+                            isInvalid={!!errors.entryIpMode}
+                            errorMessage={errors.entryIpMode}
+                            description="仅决定入口节点到第一个中继/出口的出站源地址；不影响外部入站监听。"
+                            variant="bordered"
+                          >
+                            <SelectItem key="auto">自动（沿用出口网卡/IP）</SelectItem>
+                            <SelectItem key="ipv4" isDisabled={!nodes.find(node => node.id === form.inNodeId) || !nodeHasIpv4(nodes.find(node => node.id === form.inNodeId)!) }>IPv4 出站</SelectItem>
+                            <SelectItem key="ipv6" isDisabled={!nodes.find(node => node.id === form.inNodeId) || !nodeHasIpv6(nodes.find(node => node.id === form.inNodeId)!) }>IPv6 出站</SelectItem>
+                          </Select>
+                        )}
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <Input

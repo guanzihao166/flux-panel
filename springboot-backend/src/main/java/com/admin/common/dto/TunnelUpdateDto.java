@@ -51,6 +51,9 @@ public class TunnelUpdateDto {
     /** 路由节点通信 IP 模式 JSON：{"节点ID":"ipv4|ipv6"}。 */
     private String nodeIpModes;
 
+    /** 入口节点到首跳的出站 IP 类型：auto/ipv4/ipv6，不影响入站监听。 */
+    private String entryIpMode;
+
     private String balanceStrategy;
 
     private Integer maxFails;

@@ -144,6 +144,7 @@ CREATE TABLE `tunnel` (
   `out_node_weights` varchar(1000) DEFAULT NULL,
   `chain_node_ids` varchar(1000) DEFAULT NULL,
   `node_ip_modes` varchar(2000) DEFAULT NULL,
+  `entry_ip_mode` varchar(20) NOT NULL DEFAULT 'auto',
   `balance_strategy` varchar(20) NOT NULL DEFAULT 'fifo',
   `max_fails` int(10) NOT NULL DEFAULT '1',
   `fail_timeout` int(10) NOT NULL DEFAULT '30',
