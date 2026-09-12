@@ -132,7 +132,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         R routingValidation = validateRoutingConfig(tunnelDto.getInNodeId(), tunnelDto.getType(),
                 tunnelDto.getOutNodeId(), tunnelDto.getOutNodeIds(), tunnelDto.getOutNodeWeights(),
                 tunnelDto.getChainNodeIds(), tunnelDto.getBalanceStrategy(), tunnelDto.getMaxFails(),
-                tunnelDto.getFailTimeout(), tunnelDto.getNodeIpModes(), tunnelDto.getEntryIpMode());
+                tunnelDto.getFailTimeout(), tunnelDto.getNodeIpModes());
         if (routingValidation.getCode() != 0) return routingValidation;
 
         // 3. 验证入口节点和端口
@@ -200,7 +200,6 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
                 !Objects.equals(existingTunnel.getOutNodeWeights(), tunnelUpdateDto.getOutNodeWeights()) ||
                 !Objects.equals(existingTunnel.getChainNodeIds(), tunnelUpdateDto.getChainNodeIds()) ||
                 !Objects.equals(existingTunnel.getNodeIpModes(), tunnelUpdateDto.getNodeIpModes()) ||
-                !Objects.equals(existingTunnel.getEntryIpMode(), tunnelUpdateDto.getEntryIpMode()) ||
                 !Objects.equals(existingTunnel.getBalanceStrategy(), tunnelUpdateDto.getBalanceStrategy()) ||
                 !Objects.equals(existingTunnel.getMaxFails(), tunnelUpdateDto.getMaxFails()) ||
                 !Objects.equals(existingTunnel.getFailTimeout(), tunnelUpdateDto.getFailTimeout())) {
@@ -218,12 +217,12 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         R routingValidation = validateRoutingConfig(existingTunnel.getInNodeId(), existingTunnel.getType(),
                 existingTunnel.getOutNodeId(), tunnelUpdateDto.getOutNodeIds(), tunnelUpdateDto.getOutNodeWeights(),
                 tunnelUpdateDto.getChainNodeIds(), tunnelUpdateDto.getBalanceStrategy(), tunnelUpdateDto.getMaxFails(),
-                tunnelUpdateDto.getFailTimeout(), tunnelUpdateDto.getNodeIpModes(), tunnelUpdateDto.getEntryIpMode());
+                tunnelUpdateDto.getFailTimeout(), tunnelUpdateDto.getNodeIpModes());
         if (routingValidation.getCode() != 0) return routingValidation;
         existingTunnel.setInterfaceName(tunnelUpdateDto.getInterfaceName());
         applyRoutingConfig(existingTunnel, tunnelUpdateDto.getOutNodeIds(), tunnelUpdateDto.getOutNodeWeights(),
                 tunnelUpdateDto.getChainNodeIds(), tunnelUpdateDto.getBalanceStrategy(), tunnelUpdateDto.getMaxFails(),
-                tunnelUpdateDto.getFailTimeout(), tunnelUpdateDto.getNodeIpModes(), tunnelUpdateDto.getEntryIpMode());
+                tunnelUpdateDto.getFailTimeout(), tunnelUpdateDto.getNodeIpModes());
         this.updateById(existingTunnel);
         int err = 0;
         if (up != 0){
@@ -470,21 +469,12 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
 
     private R validateRoutingConfig(Long inNodeId, Integer type, Long legacyOutNodeId, String outNodeIds,
                                     String outNodeWeights, String chainNodeIds, String strategy,
-                                    Integer maxFails, Integer failTimeout, String nodeIpModes, String entryIpMode) {
+                                    Integer maxFails, Integer failTimeout, String nodeIpModes) {
         if (!Arrays.asList("fifo", "round", "wrr").contains(StringUtils.defaultIfBlank(strategy, "fifo"))) {
             return R.err("负载策略只支持故障切换、轮询或加权轮询");
         }
         if (maxFails != null && (maxFails < 1 || maxFails > 10)) return R.err("失败阈值必须在 1-10 之间");
         if (failTimeout != null && (failTimeout < 5 || failTimeout > 3600)) return R.err("故障恢复时间必须在 5-3600 秒之间");
-        String normalizedEntryIpMode = StringUtils.defaultIfBlank(entryIpMode, NodeAddressUtils.IP_MODE_AUTO).toLowerCase(Locale.ROOT);
-        if (!NodeAddressUtils.isRouteIpMode(normalizedEntryIpMode)) return R.err("入口出站 IP 类型只能为自动、IPv4 或 IPv6");
-        if (inNodeId != null && !NodeAddressUtils.IP_MODE_AUTO.equals(normalizedEntryIpMode)) {
-            try {
-                NodeAddressUtils.resolveServerAddress(nodeService.getById(inNodeId), normalizedEntryIpMode);
-            } catch (IllegalArgumentException e) {
-                return R.err(e.getMessage());
-            }
-        }
         List<Long> outputs = parseNodeIds(outNodeIds);
         boolean routingType = type == TUNNEL_TYPE_TUNNEL_FORWARD || type == TUNNEL_TYPE_FORWARD_ENDPOINT;
         if (routingType && outputs.isEmpty() && legacyOutNodeId != null) outputs.add(legacyOutNodeId);
@@ -562,8 +552,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
     }
 
     private void applyRoutingConfig(Tunnel tunnel, String outNodeIds, String outNodeWeights, String chainNodeIds,
-                                    String strategy, Integer maxFails, Integer failTimeout, String nodeIpModes,
-                                    String entryIpMode) {
+                                    String strategy, Integer maxFails, Integer failTimeout, String nodeIpModes) {
         List<Long> outputs = parseNodeIds(outNodeIds);
         if ((tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD || tunnel.getType() == TUNNEL_TYPE_FORWARD_ENDPOINT)
                 && outputs.isEmpty() && tunnel.getOutNodeId() != null) {
@@ -573,7 +562,6 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         tunnel.setOutNodeWeights(parseWeights(outNodeWeights, outputs.size()).stream().map(String::valueOf).collect(Collectors.joining(",")));
         tunnel.setChainNodeIds(parseNodeIds(chainNodeIds).stream().map(String::valueOf).collect(Collectors.joining(",")));
         tunnel.setNodeIpModes(normalizeNodeIpModes(tunnel.getChainNodeIds(), outputs, nodeIpModes));
-        tunnel.setEntryIpMode(StringUtils.defaultIfBlank(entryIpMode, NodeAddressUtils.IP_MODE_AUTO).toLowerCase(Locale.ROOT));
         tunnel.setBalanceStrategy(StringUtils.defaultIfBlank(strategy, "fifo"));
         tunnel.setMaxFails(maxFails == null ? 1 : maxFails);
         tunnel.setFailTimeout(failTimeout == null ? 30 : failTimeout);
@@ -679,7 +667,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
 
         applyRoutingConfig(tunnel, tunnelDto.getOutNodeIds(), tunnelDto.getOutNodeWeights(),
                 tunnelDto.getChainNodeIds(), tunnelDto.getBalanceStrategy(), tunnelDto.getMaxFails(),
-                tunnelDto.getFailTimeout(), tunnelDto.getNodeIpModes(), tunnelDto.getEntryIpMode());
+                tunnelDto.getFailTimeout(), tunnelDto.getNodeIpModes());
 
         // 设置TCP和UDP监听地址
         tunnel.setTcpListenAddr(StrUtil.isNotBlank(tunnelDto.getTcpListenAddr()) ?

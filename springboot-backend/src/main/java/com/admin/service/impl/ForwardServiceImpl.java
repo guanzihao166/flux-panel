@@ -1336,7 +1336,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             if (routeResult.getCode() != 0) return routeResult;
         }
         if (useEndpointRoute) {
-            R routeResult = createEndpointRouteServices(forward, endpointTunnels, tunnel, nodeInfo.getInNode(), serviceName);
+            R routeResult = createEndpointRouteServices(forward, endpointTunnels, nodeInfo.getInNode(), serviceName);
             if (routeResult.getCode() != 0) return routeResult;
         }
 
@@ -1378,7 +1378,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         }
         if (useEndpointRoute) {
             deleteEndpointRouteServices(forward, serviceName);
-            R routeResult = createEndpointRouteServices(forward, endpointTunnels, tunnel, nodeInfo.getInNode(), serviceName);
+            R routeResult = createEndpointRouteServices(forward, endpointTunnels, nodeInfo.getInNode(), serviceName);
             if (routeResult.getCode() != 0) {
                 updateForwardStatusToError(forward);
                 return routeResult;
@@ -1520,7 +1520,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
                     .collect(Collectors.joining(","));
             hops.add(outputAddresses);
             GostDto chainResult = GostUtil.AddChains(inNode.getId(), serviceName, hops, tunnel.getProtocol(),
-                    resolveEntryOutboundInterface(tunnel, inNode), tunnel.getBalanceStrategy(), outputWeights,
+                    tunnel.getInterfaceName(), tunnel.getBalanceStrategy(), outputWeights,
                     tunnel.getMaxFails(), tunnel.getFailTimeout());
             if (!isGostOperationSuccess(chainResult)) throw new IllegalStateException(chainResult.getMsg());
             return R.ok();
@@ -1536,19 +1536,6 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         LinkedHashSet<Long> ids = new LinkedHashSet<>();
         appendNodeIds(ids, csv);
         return new ArrayList<>(ids);
-    }
-
-    /**
-     * 首跳链只在入口 agent 上设置出站绑定，不会修改服务 listener 的入站地址。
-     * 自动模式保留原来的出口网卡/IP；显式 IPv4/IPv6 模式绑定入口节点对应地址。
-     */
-    private String resolveEntryOutboundInterface(Tunnel tunnel, Node inNode) {
-        if (tunnel == null) return null;
-        String mode = tunnel.getEntryIpMode();
-        if (NodeAddressUtils.IP_MODE_IPV4.equalsIgnoreCase(mode) || NodeAddressUtils.IP_MODE_IPV6.equalsIgnoreCase(mode)) {
-            return NodeAddressUtils.resolveServerAddress(inNode, mode);
-        }
-        return tunnel.getInterfaceName();
     }
 
     private String getNodeIpMode(Tunnel tunnel, Long nodeId) {
@@ -1618,8 +1605,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         return chainIds;
     }
 
-    private R createEndpointRouteServices(Forward forward, List<Tunnel> endpointTunnels, Tunnel primaryTunnel,
-                                          Node inNode, String serviceName) {
+    private R createEndpointRouteServices(Forward forward, List<Tunnel> endpointTunnels, Node inNode, String serviceName) {
         List<Long> chainIds = new ArrayList<>();
         List<List<Long>> outputGroups = new ArrayList<>();
         List<List<Integer>> weightGroups = new ArrayList<>();
@@ -1696,7 +1682,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             }
 
             GostDto chainResult = GostUtil.AddChainsWithHopWeights(inNode.getId(), serviceName, hops,
-                    protocol == null ? "tls" : protocol, resolveEntryOutboundInterface(primaryTunnel, inNode), forward.getStrategy(),
+                    protocol == null ? "tls" : protocol, interfaceName, forward.getStrategy(),
                     hopWeights, maxFails, failTimeout);
             if (!isGostOperationSuccess(chainResult)) throw new IllegalStateException(chainResult.getMsg());
             return R.ok();
