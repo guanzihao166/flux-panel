@@ -86,9 +86,6 @@ public interface ForwardService extends IService<Forward> {
 
     R probeAllForwards();
 
-    /** 为指定用户的所有转发启用 PROXY Protocol v1，并重新下发运行中的服务。 */
-    R enableProxyProtocolForUser(Integer userId);
-
     /**
      * 更新转发排序
      * @param params 包含forwards数组的参数

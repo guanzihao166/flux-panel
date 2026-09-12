@@ -6,7 +6,6 @@ import com.admin.common.dto.GostDto;
 import com.admin.common.dto.NodeDto;
 import com.admin.common.dto.NodeUpdateDto;
 import com.admin.common.lang.R;
-import com.admin.common.utils.NodeAddressUtils;
 import com.admin.common.utils.WebSocketServer;
 import com.admin.entity.Node;
 import com.admin.entity.Tunnel;
@@ -21,7 +20,6 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import org.springframework.beans.BeanUtils;
-import org.apache.commons.lang3.StringUtils;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
@@ -176,14 +174,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         List<Tunnel> outNodeId = tunnelService.list(new QueryWrapper<Tunnel>().eq("out_node_id", updateNode.getId()));
         if (!outNodeId.isEmpty()) {
             for (Tunnel tunnel : outNodeId) {
-                String selectedMode = null;
-                try {
-                    JSONObject modes = JSONObject.parseObject(tunnel.getNodeIpModes());
-                    if (modes != null) selectedMode = modes.getString(String.valueOf(updateNode.getId()));
-                } catch (Exception ignored) {
-                    // 兼容历史或手工录入的 node_ip_modes。
-                }
-                tunnel.setOutIp(NodeAddressUtils.resolveServerAddress(updateNode, selectedMode));
+                tunnel.setOutIp(updateNode.getServerIp());
             }
             tunnelService.updateBatchById(outNodeId);
         }
@@ -273,8 +264,6 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         Node node = new Node();
         BeanUtils.copyProperties(nodeDto, node);
 
-        applyOptionalServerAddresses(node, nodeDto.getServerIp(), nodeDto.getServerIp4(), nodeDto.getServerIp6());
-
         // 验证端口范围
         validatePortRange(node.getPortSta(), node.getPortEnd());
 
@@ -301,8 +290,7 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
         node.setId(nodeUpdateDto.getId());
         node.setName(nodeUpdateDto.getName());
         node.setIp(nodeUpdateDto.getIp());
-        applyOptionalServerAddresses(node, nodeUpdateDto.getServerIp(), nodeUpdateDto.getServerIp4(),
-                nodeUpdateDto.getServerIp6());
+        node.setServerIp(nodeUpdateDto.getServerIp());
         node.setPortSta(nodeUpdateDto.getPortSta());
         node.setPortEnd(nodeUpdateDto.getPortEnd());
         node.setHttp(nodeUpdateDto.getHttp());
@@ -313,41 +301,6 @@ public class NodeServiceImpl extends ServiceImpl<NodeMapper, Node> implements No
 
         node.setUpdatedTime(System.currentTimeMillis());
         return node;
-    }
-
-    /**
-     * 应用可选的 IPv4/IPv6 服务器地址。
-     * 两个字段都可选，但至少要填写一个；旧的单 serverIp 继续兼容。
-     */
-    private void applyOptionalServerAddresses(Node node, String legacyServerIp, String serverIp4, String serverIp6) {
-        String legacy = StringUtils.trimToEmpty(legacyServerIp);
-        String ipv4 = StringUtils.trimToEmpty(serverIp4);
-        String ipv6 = StringUtils.trimToEmpty(serverIp6);
-
-        if (ipv4.isEmpty() && ipv6.isEmpty() && legacy.isEmpty()) {
-            throw new RuntimeException("IPv4 服务器地址和 IPv6 服务器地址至少填写一个");
-        }
-        if (!ipv4.isEmpty() && !NodeAddressUtils.isIPv4(ipv4)) {
-            throw new RuntimeException("IPv4 服务器地址格式错误: " + ipv4);
-        }
-        if (!ipv6.isEmpty() && !NodeAddressUtils.isIPv6(ipv6)) {
-            throw new RuntimeException("IPv6 服务器地址格式错误: " + ipv6);
-        }
-
-        // 兼容旧客户端：旧的 serverIp 仍可按格式落到对应字段。
-        if (ipv4.isEmpty() && NodeAddressUtils.isIPv4(legacy)) ipv4 = legacy;
-        if (ipv6.isEmpty() && NodeAddressUtils.isIPv6(legacy)) ipv6 = legacy;
-
-        node.setServerIp4(ipv4);
-        node.setServerIp6(ipv6);
-        // server_ip 是历史兼容列，取一个非空地址，旧逻辑仍可用。
-        if (!ipv4.isEmpty()) {
-            node.setServerIp(ipv4);
-        } else if (!ipv6.isEmpty()) {
-            node.setServerIp(ipv6);
-        } else {
-            node.setServerIp(legacy);
-        }
     }
 
     /**

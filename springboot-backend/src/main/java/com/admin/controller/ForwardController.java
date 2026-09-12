@@ -100,14 +100,6 @@ public class ForwardController extends BaseController {
         return forwardService.probeAllForwards();
     }
 
-    @RequireRole
-    @PostMapping("/proxy-protocol/enable-user")
-    public R enableProxyProtocolForUser(@RequestBody Map<String, Object> params) {
-        Object userId = params.get("userId");
-        if (userId == null) return R.err("用户ID不能为空");
-        return forwardService.enableProxyProtocolForUser(Integer.valueOf(userId.toString()));
-    }
-
     /**
      * 更新转发排序
      * @param params 包含forwards数组的参数，每个元素包含id和inx

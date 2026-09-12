@@ -11,7 +11,6 @@ interface TabItem {
   label: string;
   icon: React.ReactNode;
   adminOnly?: boolean;
-  userOnly?: boolean;
 }
 
 
@@ -66,16 +65,6 @@ export default function H5Layout({
       adminOnly: true
     },
     {
-      path: '/node-status',
-      label: '状态',
-      icon: (
-        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M5 12h4l2-7 3 14 2-7h3" />
-        </svg>
-      ),
-      userOnly: true
-    },
-    {
       path: '/profile',
       label: '我的',
       icon: (
@@ -108,7 +97,7 @@ export default function H5Layout({
 
   // 过滤tab项（根据权限）
   const filteredTabItems = tabItems.filter(item =>
-    (!item.adminOnly || isAdmin) && (!item.userOnly || !isAdmin)
+    !item.adminOnly || isAdmin
   );
 
   // 路由切换时回到页面顶部，避免上一页的滚动位置遗留

@@ -86,7 +86,4 @@ public class Forward extends BaseEntity{
     /** 端口到期时间（毫秒时间戳），0 表示永不过期。 */
     private Long expireAt;
 
-    /** 是否向 TCP 目标发送 PROXY Protocol v1，0 关闭，1 开启。 */
-    private Integer proxyProtocol;
-
 }

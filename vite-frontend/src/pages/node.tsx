@@ -26,8 +26,6 @@ interface Node {
   name: string;
   ip: string;
   serverIp: string;
-  serverIp4?: string;
-  serverIp6?: string;
   portSta: number;
   portEnd: number;
   version?: string;
@@ -54,8 +52,7 @@ interface NodeForm {
   id: number | null;
   name: string;
   ipString: string;
-  serverIp4: string;
-  serverIp6: string;
+  serverIp: string;
   portSta: number;
   portEnd: number;
   http: number; // 0 关 1 开
@@ -79,8 +76,7 @@ export default function NodePage() {
     id: null,
     name: '',
     ipString: '',
-    serverIp4: '',
-    serverIp6: '',
+    serverIp: '',
     portSta: 1000,
     portEnd: 65535,
     http: 0,
@@ -396,15 +392,10 @@ export default function NodePage() {
       }
     }
 
-    const ipv4Regex = /^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
-    if (!form.serverIp4.trim() && !form.serverIp6.trim()) {
-      newErrors.serverIp4 = 'IPv4 服务器地址和 IPv6 服务器地址至少填写一个';
-    }
-    if (form.serverIp4.trim() && !ipv4Regex.test(form.serverIp4.trim())) {
-      newErrors.serverIp4 = '请输入有效的 IPv4 地址';
-    }
-    if (form.serverIp6.trim() && !form.serverIp6.trim().includes(':')) {
-      newErrors.serverIp6 = '请输入有效的 IPv6 地址';
+    if (!form.serverIp.trim()) {
+      newErrors.serverIp = '请输入服务器IP地址';
+    } else if (!validateIp(form.serverIp.trim())) {
+      newErrors.serverIp = '请输入有效的IPv4、IPv6地址或域名';
     }
 
     if (!form.portSta || form.portSta < 1 || form.portSta > 65535) {
@@ -439,8 +430,7 @@ export default function NodePage() {
       id: node.id,
       name: node.name,
       ipString: node.ip ? node.ip.split(',').map(ip => ip.trim()).join('\n') : '',
-      serverIp4: node.serverIp4 || (/^\d{1,3}(\.\d{1,3}){3}$/.test(node.serverIp || '') ? node.serverIp : ''),
-      serverIp6: node.serverIp6 || ((node.serverIp || '').includes(':') ? node.serverIp : ''),
+      serverIp: node.serverIp || '',
       portSta: node.portSta,
       portEnd: node.portEnd,
       http: typeof node.http === 'number' ? node.http : 1,
@@ -544,8 +534,7 @@ export default function NodePage() {
       const data = isEdit ? submitData : {
         name: form.name,
         ip: ipString,
-        serverIp4: form.serverIp4.trim(),
-        serverIp6: form.serverIp6.trim(),
+        serverIp: form.serverIp,
         portSta: form.portSta,
         portEnd: form.portEnd,
         http: form.http,
@@ -564,8 +553,7 @@ export default function NodePage() {
               ...n,
               name: form.name,
               ip: ipString,
-              serverIp4: form.serverIp4.trim(),
-              serverIp6: form.serverIp6.trim(),
+              serverIp: form.serverIp,
               portSta: form.portSta,
               portEnd: form.portEnd,
               http: form.http,
@@ -592,8 +580,7 @@ export default function NodePage() {
       id: null,
       name: '',
       ipString: '',
-      serverIp4: '',
-      serverIp6: '',
+      serverIp: '',
       portSta: 1000,
       portEnd: 65535,
       http: 0,
@@ -658,7 +645,7 @@ export default function NodePage() {
                   <div className="flex justify-between items-start w-full">
                     <div className="flex-1 min-w-0">
                       <h3 className="font-semibold text-foreground truncate text-sm">{node.name}</h3>
-                      <p className="text-xs text-default-500 truncate">IPv4: {node.serverIp4 || '-'} · IPv6: {node.serverIp6 || '-'}</p>
+                      <p className="text-xs text-default-500 truncate">{node.serverIp}</p>
                     </div>
                     <div className="flex items-center gap-1.5 ml-2">
                       <Chip
@@ -874,28 +861,15 @@ export default function NodePage() {
                   variant="bordered"
                 />
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Input
-                    label="IPv4 服务器地址（可选）"
-                    placeholder="例如：192.168.1.100"
-                    value={form.serverIp4}
-                    onChange={(e) => setForm(prev => ({ ...prev, serverIp4: e.target.value }))}
-                    isInvalid={!!errors.serverIp4}
-                    errorMessage={errors.serverIp4}
-                    variant="bordered"
-                    description="IPv4 与 IPv6 至少填写一个"
-                  />
-                  <Input
-                    label="IPv6 服务器地址（可选）"
-                    placeholder="例如：2001:db8::100"
-                    value={form.serverIp6}
-                    onChange={(e) => setForm(prev => ({ ...prev, serverIp6: e.target.value }))}
-                    isInvalid={!!errors.serverIp6}
-                    errorMessage={errors.serverIp6}
-                    variant="bordered"
-                    description="可与 IPv4 同时填写"
-                  />
-                </div>
+                <Input
+                  label="服务器IP"
+                  placeholder="请输入服务器IP地址，如: 192.168.1.100 或 example.com"
+                  value={form.serverIp}
+                  onChange={(e) => setForm(prev => ({ ...prev, serverIp: e.target.value }))}
+                  isInvalid={!!errors.serverIp}
+                  errorMessage={errors.serverIp}
+                  variant="bordered"
+                />
 
                 <Textarea
                   label="入口IP"

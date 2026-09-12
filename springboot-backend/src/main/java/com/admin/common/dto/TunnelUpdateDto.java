@@ -48,9 +48,6 @@ public class TunnelUpdateDto {
 
     private String chainNodeIds;
 
-    /** 路由节点通信 IP 模式 JSON：{"节点ID":"ipv4|ipv6"}。 */
-    private String nodeIpModes;
-
     private String balanceStrategy;
 
     private Integer maxFails;

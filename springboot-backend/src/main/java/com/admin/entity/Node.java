@@ -27,12 +27,6 @@ public class Node extends BaseEntity {
 
     private String serverIp;
 
-    /** 节点通信 IPv4 地址，可与 IPv6 地址二选一或同时配置。 */
-    private String serverIp4;
-
-    /** 节点通信 IPv6 地址，可与 IPv4 地址二选一或同时配置。 */
-    private String serverIp6;
-
     private String version;
 
     private Integer portSta;

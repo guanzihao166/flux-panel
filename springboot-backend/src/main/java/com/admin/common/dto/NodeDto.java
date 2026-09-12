@@ -16,13 +16,8 @@ public class NodeDto {
     @NotBlank(message = "入口IP不能为空")
     private String ip;
 
-    // 兼容旧客户端；新客户端使用 serverIp4/serverIp6。
+    @NotBlank(message = "服务器ip不能为空")
     private String serverIp;
-
-    // IPv4/IPv6 服务器地址至少填写一项。
-    private String serverIp4;
-
-    private String serverIp6;
 
     @NotNull(message = "起始端口不能为空")
     @Min(value = 1, message = "起始端口必须大于0")

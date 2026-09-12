@@ -58,9 +58,6 @@ public interface TunnelService extends IService<Tunnel> {
      */
     R userTunnel();
 
-    /** 获取当前用户隧道所包含节点的脱敏实时状态。 */
-    R userNodeStatus();
-
     /**
      * 隧道诊断功能
      * @param tunnelId 隧道ID

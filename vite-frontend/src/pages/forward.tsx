@@ -84,7 +84,6 @@ interface Forward {
   maxSourceIps?: number;
   maxConnPerIp?: number;
   expireAt?: number;
-  proxyProtocol?: number;
 }
 
 interface Tunnel {
@@ -116,7 +115,6 @@ interface ForwardForm {
   maxSourceIps: number;
   maxConnPerIp: number;
   expireAt: number | null;
-  proxyProtocol: number;
 }
 
 interface ConnectionStat {
@@ -259,8 +257,7 @@ export default function ForwardPage() {
     bandwidthCombined: 0,
     maxSourceIps: 0,
     maxConnPerIp: 0,
-    expireAt: null,
-    proxyProtocol: 0
+    expireAt: null
   });
 
   // 表单验证错误
@@ -539,8 +536,7 @@ export default function ForwardPage() {
       bandwidthCombined: 0,
       maxSourceIps: 0,
       maxConnPerIp: 0,
-      expireAt: null,
-      proxyProtocol: 0
+      expireAt: null
     });
     setSelectedTunnel(null);
     setErrors({});
@@ -570,8 +566,7 @@ export default function ForwardPage() {
       bandwidthCombined: forward.bandwidthCombined || 0,
       maxSourceIps: forward.maxSourceIps || 0,
       maxConnPerIp: forward.maxConnPerIp || 0,
-      expireAt: forward.expireAt || null,
-      proxyProtocol: forward.proxyProtocol === 1 ? 1 : 0
+      expireAt: forward.expireAt || null
     });
     const tunnel = tunnels.find(t => t.id === forward.tunnelId);
     setSelectedTunnel(tunnel || null);
@@ -660,8 +655,7 @@ export default function ForwardPage() {
           bandwidthCombined: form.bandwidthCombined || 0,
           maxSourceIps: form.maxSourceIps || 0,
           maxConnPerIp: form.maxConnPerIp || 0,
-          expireAt: form.expireAt || 0,
-          proxyProtocol: form.proxyProtocol
+          expireAt: form.expireAt || 0
         };
         res = await updateForward(updateData);
       } else {
@@ -684,8 +678,7 @@ export default function ForwardPage() {
           bandwidthCombined: form.bandwidthCombined || 0,
           maxSourceIps: form.maxSourceIps || 0,
           maxConnPerIp: form.maxConnPerIp || 0,
-          expireAt: form.expireAt || 0,
-          proxyProtocol: form.proxyProtocol
+          expireAt: form.expireAt || 0
         };
         res = await createForward(createData);
       }
@@ -1415,11 +1408,6 @@ export default function ForwardPage() {
               >
                 {statusDisplay.text}
               </Chip>
-              {forward.proxyProtocol === 1 && (
-                <Chip color="secondary" variant="flat" size="sm" className="text-xs">
-                  PROXY v1
-                </Chip>
-              )}
             </div>
           </div>
         </CardHeader>
@@ -2053,16 +2041,6 @@ export default function ForwardPage() {
                         description="0 表示不限"
                       />
                     </div>
-
-                    <Switch
-                      isSelected={form.proxyProtocol === 1}
-                      onValueChange={(enabled) => setForm(prev => ({ ...prev, proxyProtocol: enabled ? 1 : 0 }))}
-                    >
-                      向目标发送 PROXY Protocol v1
-                    </Switch>
-                    <p className="-mt-3 text-xs text-default-500">
-                      仅适用于 TCP，目标服务需已启用 PROXY Protocol；开启后可读取客户端源 IP。
-                    </p>
 
                     <Input
                       label="端口到期时间"

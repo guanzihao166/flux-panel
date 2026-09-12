@@ -13,7 +13,6 @@ import LimitPage from "@/pages/limit";
 import ConfigPage from "@/pages/config";
 import AnnouncementPage from "@/pages/announcement";
 import { SettingsPage } from "@/pages/settings";
-import UserNodeStatusPage from "@/pages/node-status";
 
 import AdminLayout from "@/layouts/admin";
 import H5Layout from "@/layouts/h5";
@@ -188,14 +187,6 @@ function App() {
         element={
           <ProtectedRoute>
             <NodePage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/node-status"
-        element={
-          <ProtectedRoute>
-            <UserNodeStatusPage />
           </ProtectedRoute>
         }
       />
