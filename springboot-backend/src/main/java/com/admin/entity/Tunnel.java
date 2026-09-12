@@ -80,6 +80,9 @@ public class Tunnel extends BaseEntity {
     /** 按顺序经过的中继 agents。 */
     private String chainNodeIds;
 
+    /** 路由节点通信 IP 模式 JSON：{"节点ID":"ipv4|ipv6"}；只作用于中继/出口，不改入口。 */
+    private String nodeIpModes;
+
     /** fifo/round/wrr。 */
     private String balanceStrategy;
 

@@ -18,6 +18,7 @@ interface MenuItem {
   label: string;
   icon: React.ReactNode;
   adminOnly?: boolean;
+  userOnly?: boolean;
 }
 
 interface PasswordForm {
@@ -87,6 +88,16 @@ export default function AdminLayout({
         </svg>
       ),
       adminOnly: true
+    },
+    {
+      path: '/node-status',
+      label: '节点状态',
+      icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M5 12h4l2-7 3 14 2-7h3" />
+        </svg>
+      ),
+      userOnly: true
     },
     {
       path: '/limit',
@@ -250,7 +261,7 @@ export default function AdminLayout({
 
   // 过滤菜单项（根据权限）
   const filteredMenuItems = menuItems.filter(item =>
-    !item.adminOnly || isAdmin
+    (!item.adminOnly || isAdmin) && (!item.userOnly || !isAdmin)
   );
 
   return (

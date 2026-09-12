@@ -124,6 +124,12 @@ public class TunnelController extends BaseController {
         return tunnelService.userTunnel();
     }
 
+    @LogAnnotation
+    @PostMapping("/user/node-status")
+    public R userNodeStatus() {
+        return tunnelService.userNodeStatus();
+    }
+
     /**
      * 隧道诊断功能
      * @param params 包含tunnelId的参数

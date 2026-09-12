@@ -49,6 +49,7 @@ export const getUserTunnelList = (queryData: any = {}) => Network.post("/tunnel/
 export const removeUserTunnel = (params: any) => Network.post("/tunnel/user/remove", params);
 export const updateUserTunnel = (data: any) => Network.post("/tunnel/user/update", data);
 export const userTunnel = () => Network.post("/tunnel/user/tunnel");
+export const getUserNodeStatus = () => Network.post("/tunnel/user/node-status");
 
 // 转发CRUD操作 - 全部使用POST请求
 export const createForward = (data: any) => Network.post("/forward/create", data);

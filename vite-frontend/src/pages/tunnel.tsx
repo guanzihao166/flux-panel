@@ -39,6 +39,7 @@ interface Tunnel {
   outNodeIds?: string;
   outNodeWeights?: string;
   chainNodeIds?: string;
+  nodeIpModes?: string;
   balanceStrategy?: string;
   maxFails?: number;
   failTimeout?: number;
@@ -48,6 +49,9 @@ interface Node {
   id: number;
   name: string;
   status: number; // 1: 在线, 0: 离线
+  serverIp?: string;
+  serverIp4?: string;
+  serverIp6?: string;
 }
 
 interface TunnelForm {
@@ -66,6 +70,7 @@ interface TunnelForm {
   outNodeIds: string;
   outNodeWeights: string;
   chainNodeIds: string;
+  nodeIpModes: string;
   balanceStrategy: string;
   maxFails: number;
   failTimeout: number;
@@ -121,6 +126,7 @@ export default function TunnelPage() {
     outNodeIds: '',
     outNodeWeights: '',
     chainNodeIds: '',
+    nodeIpModes: '',
     balanceStrategy: 'fifo',
     maxFails: 1,
     failTimeout: 30
@@ -159,6 +165,58 @@ export default function TunnelPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const parseNodeIds = (value: string) => value.split(',').map(v => Number(v.trim())).filter(Boolean);
+
+  const getRouteNodeIds = () => Array.from(new Set([
+    ...parseNodeIds(form.chainNodeIds),
+    ...parseNodeIds(form.outNodeIds)
+  ]));
+
+  const parseNodeIpModes = (value: string): Record<string, 'ipv4' | 'ipv6'> => {
+    try {
+      const parsed = JSON.parse(value || '{}');
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const nodeHasIpv4 = (node: Node) => Boolean(node.serverIp4?.trim() || /^\d{1,3}(\.\d{1,3}){3}$/.test(node.serverIp || ''));
+  const nodeHasIpv6 = (node: Node) => Boolean(node.serverIp6?.trim() || (node.serverIp || '').includes(':'));
+
+  const defaultNodeIpMode = (node: Node): 'ipv4' | 'ipv6' => nodeHasIpv4(node) ? 'ipv4' : 'ipv6';
+
+  const getNodeIpMode = (node: Node): 'ipv4' | 'ipv6' => {
+    const mode = parseNodeIpModes(form.nodeIpModes)[String(node.id)];
+    return mode === 'ipv6' ? 'ipv6' : mode === 'ipv4' ? 'ipv4' : defaultNodeIpMode(node);
+  };
+
+  const normalizedNodeIpModes = (): string => {
+    const existing = parseNodeIpModes(form.nodeIpModes);
+    const normalized: Record<string, 'ipv4' | 'ipv6'> = {};
+    getRouteNodeIds().forEach((id) => {
+      const node = nodes.find(item => item.id === id);
+      if (node) normalized[String(id)] = existing[String(id)] || defaultNodeIpMode(node);
+    });
+    return JSON.stringify(normalized);
+  };
+
+  const updateNodeIpMode = (nodeId: number, mode: 'ipv4' | 'ipv6') => {
+    setForm(prev => ({ ...prev, nodeIpModes: JSON.stringify({ ...parseNodeIpModes(prev.nodeIpModes), [String(nodeId)]: mode }) }));
+  };
+
+  const setAllRouteIpModes = (mode: 'ipv4' | 'ipv6') => {
+    const routeNodes = getRouteNodeIds().map(id => nodes.find(node => node.id === id)).filter(Boolean) as Node[];
+    const unavailable = routeNodes.find(node => mode === 'ipv4' ? !nodeHasIpv4(node) : !nodeHasIpv6(node));
+    if (unavailable) {
+      toast.error(`节点「${unavailable.name}」没有可用的 ${mode === 'ipv4' ? 'IPv4' : 'IPv6'} 服务器地址`);
+      return;
+    }
+    const nextModes = parseNodeIpModes(form.nodeIpModes);
+    routeNodes.forEach(node => { nextModes[String(node.id)] = mode; });
+    setForm(prev => ({ ...prev, nodeIpModes: JSON.stringify(nextModes) }));
   };
 
   // 表单验证
@@ -202,6 +260,22 @@ export default function TunnelPage() {
       if (!form.protocol) {
         newErrors.protocol = '请选择协议类型';
       }
+
+      const routeIds = getRouteNodeIds();
+      const ipModes = parseNodeIpModes(form.nodeIpModes);
+      for (const nodeId of routeIds) {
+        const node = nodes.find(item => item.id === nodeId);
+        if (!node) continue;
+        const mode = ipModes[String(nodeId)] || defaultNodeIpMode(node);
+        if (mode === 'ipv4' && !nodeHasIpv4(node)) {
+          newErrors.nodeIpModes = `节点「${node.name}」未配置 IPv4 服务器地址`;
+          break;
+        }
+        if (mode === 'ipv6' && !nodeHasIpv6(node)) {
+          newErrors.nodeIpModes = `节点「${node.name}」未配置 IPv6 服务器地址`;
+          break;
+        }
+      }
     }
 
     setErrors(newErrors);
@@ -226,6 +300,7 @@ export default function TunnelPage() {
       outNodeIds: '',
       outNodeWeights: '',
       chainNodeIds: '',
+      nodeIpModes: '',
       balanceStrategy: 'fifo',
       maxFails: 1,
       failTimeout: 30
@@ -253,6 +328,7 @@ export default function TunnelPage() {
       outNodeIds: tunnel.outNodeIds || (tunnel.outNodeId ? String(tunnel.outNodeId) : ''),
       outNodeWeights: tunnel.outNodeWeights || '1',
       chainNodeIds: tunnel.chainNodeIds || '',
+      nodeIpModes: tunnel.nodeIpModes || '',
       balanceStrategy: tunnel.balanceStrategy || 'fifo',
       maxFails: tunnel.maxFails || 1,
       failTimeout: tunnel.failTimeout || 30
@@ -308,7 +384,10 @@ export default function TunnelPage() {
 
     setSubmitLoading(true);
     try {
-      const data = { ...form };
+      const data = {
+        ...form,
+        nodeIpModes: (form.type === 2 || form.type === 3) ? normalizedNodeIpModes() : ''
+      };
 
       const response = isEdit
         ? await updateTunnel(data)
@@ -923,6 +1002,45 @@ export default function TunnelPage() {
                           description="严格按从左到右的顺序经过；可用上方多选快速填入"
                           variant="bordered"
                         />
+
+                        {getRouteNodeIds().length > 0 && (
+                          <div className="rounded-lg border border-default-200 p-4 space-y-3">
+                            <div>
+                              <h4 className="font-medium">路由节点通信 IP</h4>
+                              <p className="text-xs text-default-500 mt-1">只设置中继和出口节点之间的通信地址，不修改入口 IP。可统一使用 IPv4/IPv6，也可逐节点混合选择。</p>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <Button size="sm" variant="flat" color="primary" onPress={() => setAllRouteIpModes('ipv4')}>全部 IPv4</Button>
+                              <Button size="sm" variant="flat" color="secondary" onPress={() => setAllRouteIpModes('ipv6')}>全部 IPv6</Button>
+                            </div>
+                            <div className="space-y-2">
+                              {getRouteNodeIds().map((nodeId) => {
+                                const node = nodes.find(item => item.id === nodeId);
+                                if (!node) return null;
+                                const isRelay = parseNodeIds(form.chainNodeIds).includes(nodeId);
+                                return (
+                                  <div key={node.id} className="flex flex-col sm:flex-row sm:items-center gap-3 rounded-md bg-default-100 px-3 py-2">
+                                    <div className="flex-1 min-w-0">
+                                      <div className="text-sm font-medium truncate">{node.name} <span className="text-default-500">({isRelay ? '中继' : '出口'})</span></div>
+                                      <div className="text-xs text-default-500 truncate">IPv4：{node.serverIp4 || '未配置'}　IPv6：{node.serverIp6 || '未配置'}</div>
+                                    </div>
+                                    <Select
+                                      aria-label={`${node.name} 通信 IP 类型`}
+                                      className="w-full sm:w-40"
+                                      size="sm"
+                                      selectedKeys={new Set([getNodeIpMode(node)])}
+                                      onSelectionChange={(keys) => updateNodeIpMode(node.id, String(Array.from(keys)[0] || 'ipv4') as 'ipv4' | 'ipv6')}
+                                    >
+                                      <SelectItem key="ipv4" isDisabled={!nodeHasIpv4(node)}>IPv4{nodeHasIpv4(node) ? '' : '（未配置）'}</SelectItem>
+                                      <SelectItem key="ipv6" isDisabled={!nodeHasIpv6(node)}>IPv6{nodeHasIpv6(node) ? '' : '（未配置）'}</SelectItem>
+                                    </Select>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            {errors.nodeIpModes && <p className="text-xs text-danger">{errors.nodeIpModes}</p>}
+                          </div>
+                        )}
 
                         <Select
                           label="出口负载与故障策略"

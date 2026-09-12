@@ -533,8 +533,26 @@ public class WebSocketServer extends TextWebSocketHandler {
             Long nodeId = Long.valueOf(nodeIdStr);
             JSONObject obj = JSONObject.parseObject(payload);
             NodeRuntimeStats stats = nodeRuntimeStats.computeIfAbsent(nodeId, k -> new NodeRuntimeStats());
+            long now = System.currentTimeMillis();
+            long bytesReceived = obj.getLongValue("bytes_received");
+            long bytesTransmitted = obj.getLongValue("bytes_transmitted");
+            long elapsed = stats.lastSeen > 0 ? now - stats.lastSeen : 0;
+            if (elapsed > 0 && elapsed <= 15_000L) {
+                stats.downloadSpeed = bytesReceived >= stats.bytesReceived
+                        ? (bytesReceived - stats.bytesReceived) * 1000D / elapsed : 0D;
+                stats.uploadSpeed = bytesTransmitted >= stats.bytesTransmitted
+                        ? (bytesTransmitted - stats.bytesTransmitted) * 1000D / elapsed : 0D;
+            } else {
+                stats.downloadSpeed = 0D;
+                stats.uploadSpeed = 0D;
+            }
+            stats.bytesReceived = bytesReceived;
+            stats.bytesTransmitted = bytesTransmitted;
             stats.tcpConnections.set(obj.getLongValue("tcpConnections"));
             stats.udpConnections.set(obj.getLongValue("udpConnections"));
+            stats.cpuUsage = obj.getDoubleValue("cpu_usage");
+            stats.memoryUsage = obj.getDoubleValue("memory_usage");
+            stats.lastSeen = now;
 
             Map<String, List<ConnectionStatDto>> byService = new ConcurrentHashMap<>();
             JSONArray connections = obj.getJSONArray("connectionStats");
@@ -578,10 +596,24 @@ public class WebSocketServer extends TextWebSocketHandler {
     public static class NodeRuntimeStats {
         private final AtomicLong tcpConnections = new AtomicLong(0);
         private final AtomicLong udpConnections = new AtomicLong(0);
+        private volatile long bytesReceived;
+        private volatile long bytesTransmitted;
+        private volatile double uploadSpeed;
+        private volatile double downloadSpeed;
+        private volatile double cpuUsage;
+        private volatile double memoryUsage;
+        private volatile long lastSeen;
         private final ConcurrentHashMap<String, List<ConnectionStatDto>> connectionStats = new ConcurrentHashMap<>();
 
         public long getTcpConnections() { return tcpConnections.get(); }
         public long getUdpConnections() { return udpConnections.get(); }
+        public long getBytesReceived() { return bytesReceived; }
+        public long getBytesTransmitted() { return bytesTransmitted; }
+        public double getUploadSpeed() { return uploadSpeed; }
+        public double getDownloadSpeed() { return downloadSpeed; }
+        public double getCpuUsage() { return cpuUsage; }
+        public double getMemoryUsage() { return memoryUsage; }
+        public long getLastSeen() { return lastSeen; }
         public Map<String, List<ConnectionStatDto>> getConnectionStats() { return connectionStats; }
     }
 

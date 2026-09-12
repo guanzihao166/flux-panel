@@ -91,12 +91,19 @@ public class GostUtil {
 
     public static GostDto AddRemoteService(Long node_id, String name, Integer out_port, String remoteAddr, String protocol,
                                            String strategy, String interfaceName, String weights, Integer maxFails, Integer failTimeout) {
-        return AddRemoteService(node_id, name, out_port, remoteAddr, protocol, strategy, interfaceName, weights, maxFails, failTimeout, true);
+        return AddRemoteService(node_id, name, out_port, remoteAddr, protocol, strategy, interfaceName, weights, maxFails, failTimeout, 0);
+    }
+
+    public static GostDto AddRemoteService(Long node_id, String name, Integer out_port, String remoteAddr, String protocol,
+                                           String strategy, String interfaceName, String weights, Integer maxFails, Integer failTimeout,
+                                           Integer proxyProtocol) {
+        return AddRemoteService(node_id, name, out_port, remoteAddr, protocol, strategy, interfaceName, weights, maxFails, failTimeout,
+                proxyProtocol, true);
     }
 
     private static GostDto AddRemoteService(Long node_id, String name, Integer out_port, String remoteAddr, String protocol,
                                             String strategy, String interfaceName, String weights, Integer maxFails,
-                                            Integer failTimeout, boolean withForwarder) {
+                                            Integer failTimeout, Integer proxyProtocol, boolean withForwarder) {
         JSONObject data = new JSONObject();
         data.put("name", name + "_tls");
         data.put("addr", ":" + out_port);
@@ -110,6 +117,11 @@ public class GostUtil {
 
         JSONObject handler = new JSONObject();
         handler.put("type", "relay");
+        if (Objects.equals(protocol, "tcp") && Integer.valueOf(1).equals(proxyProtocol)) {
+            JSONObject metadata = new JSONObject();
+            metadata.put("proxyProtocol", 1);
+            handler.put("metadata", metadata);
+        }
         data.put("handler", handler);
         JSONObject listener = new JSONObject();
         // relay 协议始终走 TCP 传输，UDP/TLS 业务由 relay handler 在 TCP 连接内承载。
@@ -134,6 +146,12 @@ public class GostUtil {
 
     public static GostDto UpdateRemoteService(Long node_id, String name, Integer out_port, String remoteAddr, String protocol,
                                               String strategy, String interfaceName, String weights, Integer maxFails, Integer failTimeout) {
+        return UpdateRemoteService(node_id, name, out_port, remoteAddr, protocol, strategy, interfaceName, weights, maxFails, failTimeout, 0);
+    }
+
+    public static GostDto UpdateRemoteService(Long node_id, String name, Integer out_port, String remoteAddr, String protocol,
+                                              String strategy, String interfaceName, String weights, Integer maxFails, Integer failTimeout,
+                                              Integer proxyProtocol) {
         JSONObject data = new JSONObject();
         data.put("name", name + "_tls");
         data.put("addr", ":" + out_port);
@@ -147,6 +165,11 @@ public class GostUtil {
 
         JSONObject handler = new JSONObject();
         handler.put("type", "relay");
+        if (Objects.equals(protocol, "tcp") && Integer.valueOf(1).equals(proxyProtocol)) {
+            JSONObject metadata = new JSONObject();
+            metadata.put("proxyProtocol", 1);
+            handler.put("metadata", metadata);
+        }
         data.put("handler", handler);
         JSONObject listener = new JSONObject();
         listener.put("type", "tcp");
@@ -278,7 +301,7 @@ public class GostUtil {
     }
 
     public static GostDto AddRelayService(Long nodeId, String name, Integer port, String protocol, String interfaceName) {
-        return AddRemoteService(nodeId, name, port, "127.0.0.1:9", protocol, "fifo", interfaceName, null, 1, 30, false);
+        return AddRemoteService(nodeId, name, port, "127.0.0.1:9", protocol, "fifo", interfaceName, null, 1, 30, 0, false);
     }
 
     public static GostDto AddChains(Long nodeId, String name, List<String> hopAddresses, String protocol,
@@ -409,6 +432,11 @@ public class GostUtil {
 
         // 配置处理器
         JSONObject handler = createHandler(protocol, name, fow_type);
+        if (Objects.equals(protocol, "tcp") && meta != null && meta.getIntValue("flux_proxy_protocol") == 1) {
+            JSONObject handlerMetadata = new JSONObject();
+            handlerMetadata.put("proxyProtocol", 1);
+            handler.put("metadata", handlerMetadata);
+        }
         service.put("handler", handler);
 
         // 配置监听器

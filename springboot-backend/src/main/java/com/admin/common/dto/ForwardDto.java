@@ -55,4 +55,7 @@ public class ForwardDto {
 
     private Long expireAt;
 
+    /** 0 关闭，1 使用 PROXY Protocol v1。 */
+    private Integer proxyProtocol;
+
 }

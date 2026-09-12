@@ -6,6 +6,7 @@ import com.admin.common.dto.*;
 import com.admin.common.lang.R;
 import com.admin.common.utils.GostUtil;
 import com.admin.common.utils.JwtUtil;
+import com.admin.common.utils.NodeAddressUtils;
 import com.admin.common.utils.WebSocketServer;
 import com.admin.entity.Forward;
 import com.admin.entity.Node;
@@ -18,6 +19,7 @@ import com.admin.service.ForwardService;
 import com.admin.service.NodeService;
 import com.admin.service.TunnelService;
 import com.admin.service.UserTunnelService;
+import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -130,7 +132,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         R routingValidation = validateRoutingConfig(tunnelDto.getInNodeId(), tunnelDto.getType(),
                 tunnelDto.getOutNodeId(), tunnelDto.getOutNodeIds(), tunnelDto.getOutNodeWeights(),
                 tunnelDto.getChainNodeIds(), tunnelDto.getBalanceStrategy(), tunnelDto.getMaxFails(),
-                tunnelDto.getFailTimeout());
+                tunnelDto.getFailTimeout(), tunnelDto.getNodeIpModes());
         if (routingValidation.getCode() != 0) return routingValidation;
 
         // 3. 验证入口节点和端口
@@ -197,6 +199,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
                 !Objects.equals(existingTunnel.getOutNodeIds(), tunnelUpdateDto.getOutNodeIds()) ||
                 !Objects.equals(existingTunnel.getOutNodeWeights(), tunnelUpdateDto.getOutNodeWeights()) ||
                 !Objects.equals(existingTunnel.getChainNodeIds(), tunnelUpdateDto.getChainNodeIds()) ||
+                !Objects.equals(existingTunnel.getNodeIpModes(), tunnelUpdateDto.getNodeIpModes()) ||
                 !Objects.equals(existingTunnel.getBalanceStrategy(), tunnelUpdateDto.getBalanceStrategy()) ||
                 !Objects.equals(existingTunnel.getMaxFails(), tunnelUpdateDto.getMaxFails()) ||
                 !Objects.equals(existingTunnel.getFailTimeout(), tunnelUpdateDto.getFailTimeout())) {
@@ -214,12 +217,12 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         R routingValidation = validateRoutingConfig(existingTunnel.getInNodeId(), existingTunnel.getType(),
                 existingTunnel.getOutNodeId(), tunnelUpdateDto.getOutNodeIds(), tunnelUpdateDto.getOutNodeWeights(),
                 tunnelUpdateDto.getChainNodeIds(), tunnelUpdateDto.getBalanceStrategy(), tunnelUpdateDto.getMaxFails(),
-                tunnelUpdateDto.getFailTimeout());
+                tunnelUpdateDto.getFailTimeout(), tunnelUpdateDto.getNodeIpModes());
         if (routingValidation.getCode() != 0) return routingValidation;
         existingTunnel.setInterfaceName(tunnelUpdateDto.getInterfaceName());
         applyRoutingConfig(existingTunnel, tunnelUpdateDto.getOutNodeIds(), tunnelUpdateDto.getOutNodeWeights(),
                 tunnelUpdateDto.getChainNodeIds(), tunnelUpdateDto.getBalanceStrategy(), tunnelUpdateDto.getMaxFails(),
-                tunnelUpdateDto.getFailTimeout());
+                tunnelUpdateDto.getFailTimeout(), tunnelUpdateDto.getNodeIpModes());
         this.updateById(existingTunnel);
         int err = 0;
         if (up != 0){
@@ -317,6 +320,93 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         return R.ok(tunnelDtos);
     }
 
+    @Override
+    public R userNodeStatus() {
+        UserInfo currentUser = getCurrentUserInfo();
+        List<Tunnel> tunnels = getUserAccessibleTunnels(currentUser);
+        List<UserNodeStatusDto> result = new ArrayList<>();
+        Map<Long, Node> nodeCache = new HashMap<>();
+
+        for (Tunnel tunnel : tunnels) {
+            LinkedHashMap<Long, UserNodeStatusDto.NodeStatusDto> nodes = new LinkedHashMap<>();
+            addUserNodeStatus(nodes, tunnel.getInNodeId(), "入口", nodeCache);
+            for (Long nodeId : parseNodeIds(tunnel.getChainNodeIds())) {
+                addUserNodeStatus(nodes, nodeId, "中继", nodeCache);
+            }
+            Integer tunnelType = tunnel.getType();
+            if (Integer.valueOf(TUNNEL_TYPE_TUNNEL_FORWARD).equals(tunnelType)
+                    || Integer.valueOf(TUNNEL_TYPE_FORWARD_ENDPOINT).equals(tunnelType)) {
+                List<Long> outNodeIds = parseNodeIds(tunnel.getOutNodeIds());
+                if (outNodeIds.isEmpty() && tunnel.getOutNodeId() != null) outNodeIds.add(tunnel.getOutNodeId());
+                for (Long nodeId : outNodeIds) addUserNodeStatus(nodes, nodeId, "出口", nodeCache);
+            }
+
+            UserNodeStatusDto dto = new UserNodeStatusDto();
+            dto.setTunnelId(tunnel.getId());
+            dto.setTunnelName(tunnel.getName());
+            dto.setTunnelType(tunnel.getType());
+            dto.setNodes(new ArrayList<>(nodes.values()));
+            result.add(dto);
+        }
+        return R.ok(result);
+    }
+
+    private void addUserNodeStatus(Map<Long, UserNodeStatusDto.NodeStatusDto> nodes, Long nodeId, String role,
+                                   Map<Long, Node> nodeCache) {
+        if (nodeId == null) return;
+        Node node = nodeCache.computeIfAbsent(nodeId, nodeService::getById);
+        if (node == null) return;
+        UserNodeStatusDto.NodeStatusDto dto = nodes.get(nodeId);
+        if (dto == null) {
+            dto = new UserNodeStatusDto.NodeStatusDto();
+            dto.setNodeId(node.getId());
+            dto.setNodeName(maskNodeName(node.getName()));
+            dto.setServer(maskServer(StringUtils.defaultIfBlank(node.getServerIp(), node.getIp())));
+            dto.setStatus(node.getStatus());
+            dto.setVersion(node.getVersion());
+            WebSocketServer.NodeRuntimeStats stats = WebSocketServer.getNodeRuntimeStats(node.getId());
+            if (stats != null) {
+                dto.setTcpConnections(stats.getTcpConnections());
+                dto.setUdpConnections(stats.getUdpConnections());
+                dto.setBytesReceived(stats.getBytesReceived());
+                dto.setBytesTransmitted(stats.getBytesTransmitted());
+                dto.setUploadSpeed(stats.getUploadSpeed());
+                dto.setDownloadSpeed(stats.getDownloadSpeed());
+                dto.setCpuUsage(stats.getCpuUsage());
+                dto.setMemoryUsage(stats.getMemoryUsage());
+                dto.setLastSeen(stats.getLastSeen());
+                // 运行时上报超过 30 秒未更新时，避免继续展示数据库中的历史在线状态。
+                if (stats.getLastSeen() <= 0 || System.currentTimeMillis() - stats.getLastSeen() > 30_000L) {
+                    dto.setStatus(0);
+                }
+            }
+            nodes.put(nodeId, dto);
+        }
+        if (StringUtils.isBlank(dto.getRole())) dto.setRole(role);
+        else if (!dto.getRole().contains(role)) dto.setRole(dto.getRole() + " / " + role);
+    }
+
+    private String maskNodeName(String value) {
+        if (StringUtils.isBlank(value)) return "节点";
+        String text = value.trim();
+        if (text.length() <= 2) return text.substring(0, 1) + "*";
+        return text.substring(0, 1) + "***" + text.substring(text.length() - 1);
+    }
+
+    private String maskServer(String value) {
+        if (StringUtils.isBlank(value)) return "未知服务器";
+        String text = value.trim();
+        if (text.contains(".")) {
+            String[] parts = text.split("\\.", -1);
+            if (parts.length == 4) return parts[0] + "." + parts[1] + ".*.*";
+        }
+        if (text.contains(":")) {
+            String[] parts = text.split(":", -1);
+            if (parts.length > 2) return parts[0] + ":" + parts[1] + ":*:*";
+        }
+        return text.length() <= 4 ? "***" : text.substring(0, 2) + "***";
+    }
+
     // ========== 私有辅助方法 ==========
 
     /**
@@ -379,7 +469,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
 
     private R validateRoutingConfig(Long inNodeId, Integer type, Long legacyOutNodeId, String outNodeIds,
                                     String outNodeWeights, String chainNodeIds, String strategy,
-                                    Integer maxFails, Integer failTimeout) {
+                                    Integer maxFails, Integer failTimeout, String nodeIpModes) {
         if (!Arrays.asList("fifo", "round", "wrr").contains(StringUtils.defaultIfBlank(strategy, "fifo"))) {
             return R.err("负载策略只支持故障切换、轮询或加权轮询");
         }
@@ -401,11 +491,68 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
             if (!seen.add(nodeId)) return R.err("入口、中继和出口节点不能重复");
             if (nodeService.getById(nodeId) == null) return R.err("出口节点不存在: " + nodeId);
         }
+        try {
+            validateNodeIpModes(chainNodeIds, outputs, nodeIpModes);
+        } catch (IllegalArgumentException e) {
+            return R.err(e.getMessage());
+        }
         return R.ok();
     }
 
+    private void validateNodeIpModes(String chainNodeIds, List<Long> outputIds, String nodeIpModes) {
+        Map<Long, String> modes = parseNodeIpModes(nodeIpModes);
+        Set<Long> routeNodeIds = new LinkedHashSet<>();
+        routeNodeIds.addAll(parseNodeIds(chainNodeIds));
+        routeNodeIds.addAll(outputIds);
+        for (Map.Entry<Long, String> entry : modes.entrySet()) {
+            if (!routeNodeIds.contains(entry.getKey())) {
+                throw new IllegalArgumentException("IP 通信设置包含不在当前路由中的节点: " + entry.getKey());
+            }
+            if (!NodeAddressUtils.isRouteIpMode(entry.getValue()) || NodeAddressUtils.IP_MODE_AUTO.equalsIgnoreCase(entry.getValue())) {
+                throw new IllegalArgumentException("节点 " + entry.getKey() + " 的通信 IP 类型只能为 IPv4 或 IPv6");
+            }
+            Node node = nodeService.getById(entry.getKey());
+            NodeAddressUtils.resolveServerAddress(node, entry.getValue());
+        }
+    }
+
+    private Map<Long, String> parseNodeIpModes(String value) {
+        Map<Long, String> result = new LinkedHashMap<>();
+        if (StringUtils.isBlank(value)) return result;
+        JSONObject object;
+        try {
+            object = JSON.parseObject(value);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("节点通信 IP 设置格式错误");
+        }
+        if (object == null) return result;
+        for (Map.Entry<String, Object> entry : object.entrySet()) {
+            try {
+                Long nodeId = Long.valueOf(entry.getKey());
+                String mode = StringUtils.trimToEmpty(String.valueOf(entry.getValue())).toLowerCase(Locale.ROOT);
+                result.put(nodeId, mode);
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("节点通信 IP 设置中的节点 ID 错误");
+            }
+        }
+        return result;
+    }
+
+    private String normalizeNodeIpModes(String chainNodeIds, List<Long> outputIds, String value) {
+        Map<Long, String> modes = parseNodeIpModes(value);
+        Set<Long> routeNodeIds = new LinkedHashSet<>();
+        routeNodeIds.addAll(parseNodeIds(chainNodeIds));
+        routeNodeIds.addAll(outputIds);
+        JSONObject normalized = new JSONObject(true);
+        for (Long nodeId : routeNodeIds) {
+            String mode = modes.get(nodeId);
+            if (StringUtils.isNotBlank(mode)) normalized.put(String.valueOf(nodeId), mode.toLowerCase(Locale.ROOT));
+        }
+        return normalized.toJSONString();
+    }
+
     private void applyRoutingConfig(Tunnel tunnel, String outNodeIds, String outNodeWeights, String chainNodeIds,
-                                    String strategy, Integer maxFails, Integer failTimeout) {
+                                    String strategy, Integer maxFails, Integer failTimeout, String nodeIpModes) {
         List<Long> outputs = parseNodeIds(outNodeIds);
         if ((tunnel.getType() == TUNNEL_TYPE_TUNNEL_FORWARD || tunnel.getType() == TUNNEL_TYPE_FORWARD_ENDPOINT)
                 && outputs.isEmpty() && tunnel.getOutNodeId() != null) {
@@ -414,13 +561,17 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
         tunnel.setOutNodeIds(outputs.stream().map(String::valueOf).collect(Collectors.joining(",")));
         tunnel.setOutNodeWeights(parseWeights(outNodeWeights, outputs.size()).stream().map(String::valueOf).collect(Collectors.joining(",")));
         tunnel.setChainNodeIds(parseNodeIds(chainNodeIds).stream().map(String::valueOf).collect(Collectors.joining(",")));
+        tunnel.setNodeIpModes(normalizeNodeIpModes(tunnel.getChainNodeIds(), outputs, nodeIpModes));
         tunnel.setBalanceStrategy(StringUtils.defaultIfBlank(strategy, "fifo"));
         tunnel.setMaxFails(maxFails == null ? 1 : maxFails);
         tunnel.setFailTimeout(failTimeout == null ? 30 : failTimeout);
         if (!outputs.isEmpty()) {
             tunnel.setOutNodeId(outputs.get(0));
             Node primary = nodeService.getById(outputs.get(0));
-            if (primary != null) tunnel.setOutIp(primary.getServerIp());
+            if (primary != null) {
+                String selectedMode = parseNodeIpModes(tunnel.getNodeIpModes()).get(primary.getId());
+                tunnel.setOutIp(NodeAddressUtils.resolveServerAddress(primary, selectedMode));
+            }
         }
     }
 
@@ -516,7 +667,7 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
 
         applyRoutingConfig(tunnel, tunnelDto.getOutNodeIds(), tunnelDto.getOutNodeWeights(),
                 tunnelDto.getChainNodeIds(), tunnelDto.getBalanceStrategy(), tunnelDto.getMaxFails(),
-                tunnelDto.getFailTimeout());
+                tunnelDto.getFailTimeout(), tunnelDto.getNodeIpModes());
 
         // 设置TCP和UDP监听地址
         tunnel.setTcpListenAddr(StrUtil.isNotBlank(tunnelDto.getTcpListenAddr()) ?
@@ -581,7 +732,8 @@ public class TunnelServiceImpl extends ServiceImpl<TunnelMapper, Tunnel> impleme
                 .anyMatch(node -> node.getStatus() == NODE_STATUS_ONLINE);
         if (!anyOnline) return R.err("所有出口节点均离线，至少需要一个在线出口完成初始配置");
         tunnel.setOutNodeId(primary.getId());
-        tunnel.setOutIp(primary.getServerIp());
+        String primaryMode = parseNodeIpModes(tunnel.getNodeIpModes()).get(primary.getId());
+        tunnel.setOutIp(NodeAddressUtils.resolveServerAddress(primary, primaryMode));
 
         return R.ok();
     }

@@ -59,7 +59,8 @@ CREATE TABLE `forward` (
   `bandwidth_combined` bigint(20) NOT NULL DEFAULT '0',
   `max_source_ips` int(10) NOT NULL DEFAULT '0',
   `max_conn_per_ip` int(10) NOT NULL DEFAULT '0',
-  `expire_at` bigint(20) NOT NULL DEFAULT '0'
+    `expire_at` bigint(20) NOT NULL DEFAULT '0',
+    `proxy_protocol` tinyint(1) NOT NULL DEFAULT '0'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- --------------------------------------------------------
@@ -74,6 +75,8 @@ CREATE TABLE `node` (
   `secret` varchar(100) NOT NULL,
   `ip` longtext,
   `server_ip` varchar(100) NOT NULL,
+  `server_ip4` varchar(100) DEFAULT NULL,
+  `server_ip6` varchar(255) DEFAULT NULL,
   `port_sta` int(10) NOT NULL,
   `port_end` int(10) NOT NULL,
   `version` varchar(100) DEFAULT NULL,
@@ -140,6 +143,7 @@ CREATE TABLE `tunnel` (
   `out_node_ids` varchar(1000) DEFAULT NULL,
   `out_node_weights` varchar(1000) DEFAULT NULL,
   `chain_node_ids` varchar(1000) DEFAULT NULL,
+  `node_ip_modes` varchar(2000) DEFAULT NULL,
   `balance_strategy` varchar(20) NOT NULL DEFAULT 'fifo',
   `max_fails` int(10) NOT NULL DEFAULT '1',
   `fail_timeout` int(10) NOT NULL DEFAULT '30',

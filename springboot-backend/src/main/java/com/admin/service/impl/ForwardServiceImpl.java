@@ -7,6 +7,7 @@ import com.admin.common.dto.GostDto;
 import com.admin.common.lang.R;
 import com.admin.common.utils.GostUtil;
 import com.admin.common.utils.JwtUtil;
+import com.admin.common.utils.NodeAddressUtils;
 import com.admin.common.utils.WebSocketServer;
 import com.admin.entity.*;
 import com.admin.mapper.ForwardMapper;
@@ -83,7 +84,8 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         R featureValidation = validateForwardFeatureFields(forwardDto.getMode(), forwardDto.getChainStrategy(),
                 forwardDto.getChainHops(), forwardDto.getTunnelIds(), forwardDto.getBandwidthMode(),
                 forwardDto.getBandwidthUp(), forwardDto.getBandwidthDown(), forwardDto.getBandwidthCombined(),
-                forwardDto.getMaxSourceIps(), forwardDto.getMaxConnPerIp(), forwardDto.getExpireAt());
+                forwardDto.getMaxSourceIps(), forwardDto.getMaxConnPerIp(), forwardDto.getExpireAt(),
+                forwardDto.getProxyProtocol());
         if (featureValidation.getCode() != 0) return featureValidation;
 
         // 3. 普通用户权限和限制检查
@@ -164,7 +166,8 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         R featureValidation = validateForwardFeatureFields(forwardUpdateDto.getMode(), forwardUpdateDto.getChainStrategy(),
                 forwardUpdateDto.getChainHops(), forwardUpdateDto.getTunnelIds(), forwardUpdateDto.getBandwidthMode(),
                 forwardUpdateDto.getBandwidthUp(), forwardUpdateDto.getBandwidthDown(), forwardUpdateDto.getBandwidthCombined(),
-                forwardUpdateDto.getMaxSourceIps(), forwardUpdateDto.getMaxConnPerIp(), forwardUpdateDto.getExpireAt());
+                forwardUpdateDto.getMaxSourceIps(), forwardUpdateDto.getMaxConnPerIp(), forwardUpdateDto.getExpireAt(),
+                forwardUpdateDto.getProxyProtocol());
         if (featureValidation.getCode() != 0) return featureValidation;
         boolean tunnelChanged = isTunnelChanged(existForward, forwardUpdateDto);
         // 4. 检查权限和限制
@@ -829,6 +832,28 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         }
     }
 
+    @Override
+    public R enableProxyProtocolForUser(Integer userId) {
+        if (userId == null || userId <= 0) return R.err("用户ID不正确");
+
+        List<Forward> forwards = this.list(new QueryWrapper<Forward>().eq("user_id", userId));
+        int refreshed = 0;
+        for (Forward forward : forwards) {
+            forward.setProxyProtocol(1);
+            forward.setUpdatedTime(System.currentTimeMillis());
+            if (!this.updateById(forward)) {
+                return R.err("保存转发 " + forward.getId() + " 的 PROXY Protocol 配置失败");
+            }
+            if (forward.getStatus() == FORWARD_STATUS_ACTIVE) {
+                updateForwardA(forward);
+                refreshed++;
+            }
+        }
+        R result = R.ok();
+        result.setMsg("已为 " + forwards.size() + " 条转发开启 PROXY Protocol，已刷新 " + refreshed + " 条运行中服务");
+        return result;
+    }
+
     /**
      * 从地址字符串中提取IP地址
      * 支持格式: ip:port, [ipv6]:port, domain:port
@@ -1001,7 +1026,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     private R validateForwardFeatureFields(String mode, String chainStrategy, Integer chainHops,
                                            String tunnelIds, String bandwidthMode, Long bandwidthUp,
                                            Long bandwidthDown, Long bandwidthCombined, Integer maxSourceIps,
-                                           Integer maxConnPerIp, Long expireAt) {
+                                           Integer maxConnPerIp, Long expireAt, Integer proxyProtocol) {
         String normalizedMode = org.apache.commons.lang3.StringUtils.defaultIfBlank(mode, "direct");
         if (!Arrays.asList("direct", "single", "chain").contains(normalizedMode)) {
             return R.err("转发模式只支持直连、单跳转发或链式转发");
@@ -1027,6 +1052,9 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         if (maxSourceIps != null && maxSourceIps < 0) return R.err("最大来源IP数不能为负数");
         if (maxConnPerIp != null && maxConnPerIp < 0) return R.err("每IP最大连接数不能为负数");
         if (expireAt != null && expireAt < 0) return R.err("到期时间不能为负数");
+        if (proxyProtocol != null && proxyProtocol != 0 && proxyProtocol != 1) {
+            return R.err("PROXY Protocol 仅支持关闭或 v1");
+        }
         return R.ok();
     }
 
@@ -1242,6 +1270,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         forward.setMaxSourceIps(forward.getMaxSourceIps() == null ? 0 : forward.getMaxSourceIps());
         forward.setMaxConnPerIp(forward.getMaxConnPerIp() == null ? 0 : forward.getMaxConnPerIp());
         forward.setExpireAt(forward.getExpireAt() == null ? 0L : forward.getExpireAt());
+        forward.setProxyProtocol(Integer.valueOf(1).equals(forward.getProxyProtocol()) ? 1 : 0);
         return forward;
     }
 
@@ -1288,6 +1317,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         forward.setMaxSourceIps(forward.getMaxSourceIps() == null ? 0 : forward.getMaxSourceIps());
         forward.setMaxConnPerIp(forward.getMaxConnPerIp() == null ? 0 : forward.getMaxConnPerIp());
         forward.setExpireAt(forward.getExpireAt() == null ? 0L : forward.getExpireAt());
+        forward.setProxyProtocol(Integer.valueOf(1).equals(forward.getProxyProtocol()) ? 1 : 0);
         return forward;
     }
 
@@ -1483,10 +1513,10 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             List<String> hops = new ArrayList<>();
             for (Long nodeId : chainIds) {
                 Node node = nodeService.getNodeById(nodeId);
-                hops.add(formatAddress(node.getServerIp(), forward.getOutPort()));
+                hops.add(NodeAddressUtils.formatAddress(node, getNodeIpMode(tunnel, nodeId), forward.getOutPort()));
             }
             String outputAddresses = outputIds.stream().map(nodeService::getNodeById)
-                    .filter(Objects::nonNull).map(n -> formatAddress(n.getServerIp(), forward.getOutPort()))
+                    .filter(Objects::nonNull).map(n -> NodeAddressUtils.formatAddress(n, getNodeIpMode(tunnel, n.getId()), forward.getOutPort()))
                     .collect(Collectors.joining(","));
             hops.add(outputAddresses);
             GostDto chainResult = GostUtil.AddChains(inNode.getId(), serviceName, hops, tunnel.getProtocol(),
@@ -1506,6 +1536,25 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         LinkedHashSet<Long> ids = new LinkedHashSet<>();
         appendNodeIds(ids, csv);
         return new ArrayList<>(ids);
+    }
+
+    private String getNodeIpMode(Tunnel tunnel, Long nodeId) {
+        if (tunnel == null || nodeId == null || isBlank(tunnel.getNodeIpModes())) return null;
+        try {
+            JSONObject modes = JSONObject.parseObject(tunnel.getNodeIpModes());
+            return modes == null ? null : modes.getString(String.valueOf(nodeId));
+        } catch (Exception ignored) {
+            // 历史或手工数据无效时回退到兼容 serverIp，避免影响已有链路。
+            return null;
+        }
+    }
+
+    private String getEndpointNodeIpMode(List<Tunnel> endpoints, Long nodeId) {
+        for (Tunnel endpoint : endpoints) {
+            String mode = getNodeIpMode(endpoint, nodeId);
+            if (!isBlank(mode)) return mode;
+        }
+        return null;
     }
 
     private List<Tunnel> getEndpointTunnels(Forward forward) {
@@ -1619,13 +1668,14 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
             List<List<Integer>> hopWeights = new ArrayList<>();
             for (Long nodeId : chainIds) {
                 Node node = nodeService.getNodeById(nodeId);
-                hops.add(formatAddress(node.getServerIp(), forward.getOutPort()));
+                hops.add(NodeAddressUtils.formatAddress(node, getEndpointNodeIpMode(endpointTunnels, nodeId), forward.getOutPort()));
                 hopWeights.add(Collections.singletonList(1));
             }
             for (int i = 0; i < outputGroups.size(); i++) {
                 List<Long> outputIds = outputGroups.get(i);
+                Tunnel endpoint = endpointTunnels.get(i);
                 String outputAddresses = outputIds.stream().map(nodeService::getNodeById)
-                        .filter(Objects::nonNull).map(n -> formatAddress(n.getServerIp(), forward.getOutPort()))
+                        .filter(Objects::nonNull).map(n -> NodeAddressUtils.formatAddress(n, getNodeIpMode(endpoint, n.getId()), forward.getOutPort()))
                         .collect(Collectors.joining(","));
                 hops.add(outputAddresses);
                 hopWeights.add(weightGroups.get(i));
@@ -1690,7 +1740,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
      */
     private R createRemoteService(Node outNode, String serviceName, Forward forward, String protocol, String interfaceName) {
         GostDto result = GostUtil.AddRemoteService(outNode.getId(), serviceName, forward.getOutPort(), forward.getRemoteAddr(), protocol,
-                forward.getStrategy(), interfaceName, forward.getTargetWeights(), 1, 30);
+                forward.getStrategy(), interfaceName, forward.getTargetWeights(), 1, 30, forward.getProxyProtocol());
         return isGostOperationSuccess(result) ? R.ok() : R.err(result.getMsg());
     }
 
@@ -1717,6 +1767,7 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
         meta.put("flux_max_source_ips", forward.getMaxSourceIps() == null ? 0 : forward.getMaxSourceIps());
         meta.put("flux_max_conn_per_ip", forward.getMaxConnPerIp() == null ? 0 : forward.getMaxConnPerIp());
         meta.put("flux_expire_at", forward.getExpireAt() == null ? 0L : forward.getExpireAt());
+        meta.put("flux_proxy_protocol", Integer.valueOf(1).equals(forward.getProxyProtocol()) ? 1 : 0);
         return meta;
     }
 
@@ -1747,9 +1798,10 @@ public class ForwardServiceImpl extends ServiceImpl<ForwardMapper, Forward> impl
     private R updateRemoteService(Node outNode, String serviceName, Forward forward, String protocol, String interfaceName) {
         // 创建新远程服务
         GostDto createResult = GostUtil.UpdateRemoteService(outNode.getId(), serviceName, forward.getOutPort(), forward.getRemoteAddr(), protocol,
-                forward.getStrategy(), interfaceName, forward.getTargetWeights(), 1, 30);
+                forward.getStrategy(), interfaceName, forward.getTargetWeights(), 1, 30, forward.getProxyProtocol());
         if (createResult.getMsg().contains(GOST_NOT_FOUND_MSG)) {
-            createResult = GostUtil.AddRemoteService(outNode.getId(), serviceName, forward.getOutPort(), forward.getRemoteAddr(), protocol, forward.getStrategy(), interfaceName);
+            createResult = GostUtil.AddRemoteService(outNode.getId(), serviceName, forward.getOutPort(), forward.getRemoteAddr(), protocol,
+                    forward.getStrategy(), interfaceName, forward.getTargetWeights(), 1, 30, forward.getProxyProtocol());
         }
         return isGostOperationSuccess(createResult) ? R.ok() : R.err(createResult.getMsg());
     }
